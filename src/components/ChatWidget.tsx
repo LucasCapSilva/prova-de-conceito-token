@@ -242,9 +242,9 @@ export default function ChatWidget() {
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Fechar chat" : "Abrir chat com vendedores"}
         aria-expanded={open}
-        className={`fixed right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand text-xl text-white shadow-lg transition hover:bg-brand-dark ${
-          onCart ? "bottom-20 lg:bottom-4" : "bottom-4"
-        }`}
+        className={`fixed right-4 z-40 h-12 w-12 items-center justify-center rounded-full bg-brand text-xl text-white shadow-lg transition hover:bg-brand-dark ${
+          open ? "hidden sm:flex" : "flex"
+        } ${onCart ? "bottom-20 lg:bottom-4" : "bottom-4"}`}
       >
         {open ? "✕" : "💬"}
       </button>
