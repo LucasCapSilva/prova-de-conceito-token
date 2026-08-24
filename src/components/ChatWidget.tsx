@@ -70,10 +70,10 @@ export default function ChatWidget() {
   return (
     <>
       {open && (
-        <div className="fixed inset-0 z-40 flex flex-col bg-surface sm:inset-auto sm:bottom-20 sm:right-4 sm:h-auto sm:w-80 sm:max-w-[calc(100vw-2rem)] sm:overflow-hidden sm:rounded-lg sm:shadow-lg">
+        <div className="fixed inset-0 z-40 flex flex-col overflow-hidden bg-surface pb-[env(safe-area-inset-bottom)] sm:inset-auto sm:bottom-20 sm:right-4 sm:h-auto sm:w-80 sm:max-w-[calc(100vw-2rem)] sm:overflow-hidden sm:rounded-lg sm:shadow-lg sm:pb-0">
           {active && seller ? (
             <>
-              <header className="flex items-center gap-2 border-b border-line bg-brand-soft px-3 py-2 sm:py-2.5">
+              <header className="flex items-center gap-2 border-b border-line bg-brand-soft px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:py-2.5 sm:pt-2.5">
                 <button
                   type="button"
                   onClick={backToList}
@@ -107,7 +107,7 @@ export default function ChatWidget() {
 
               <div
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto bg-surface px-3 py-3 sm:h-72 sm:flex-none"
+                className="min-h-0 flex-1 overflow-y-auto bg-surface px-3 py-3 sm:h-72 sm:flex-none"
               >
                 {messages.length === 0 && !typing ? (
                   <p className="py-6 text-center text-xs text-ink-soft">
@@ -156,7 +156,7 @@ export default function ChatWidget() {
               </div>
 
               <form
-                className="flex items-center gap-2 border-t border-line bg-white px-3 py-2 sm:py-2.5"
+                className="flex items-center gap-2 border-t border-line bg-white px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:py-2.5 sm:pb-2.5"
                 onSubmit={(e) => {
                   e.preventDefault();
                   send();
@@ -183,7 +183,7 @@ export default function ChatWidget() {
             </>
           ) : (
             <>
-              <header className="flex items-center justify-between border-b border-line bg-brand-soft px-3 py-2 sm:py-2.5">
+              <header className="flex items-center justify-between border-b border-line bg-brand-soft px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:py-2.5 sm:pt-2.5">
                 <div>
                   <p className="text-sm font-bold text-ink">
                     Chat com vendedores
@@ -201,7 +201,7 @@ export default function ChatWidget() {
                   ✕
                 </button>
               </header>
-              <ul className="flex-1 overflow-y-auto sm:max-h-80 sm:flex-none">
+              <ul className="min-h-0 flex-1 overflow-y-auto sm:max-h-80 sm:flex-none">
                 {SELLERS.map((s) => {
                   const last = lastOf(chatFor(s.id));
                   return (
