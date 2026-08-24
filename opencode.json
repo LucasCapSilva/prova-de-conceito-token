@@ -1,0 +1,98 @@
+﻿{
+    "$schema":  "https://opencode.ai/config.json",
+    "instructions":  [
+                         "PROJETO.md"
+                     ],
+    "tools":  {
+                  "task":  true
+              },
+    "agent":  {
+                  "tarefa":  {
+                                 "description":  "Executa uma tarefa do backlog do PROJETO.md, do inicio ao build passando",
+                                 "mode":  "primary",
+                                 "temperature":  0.7,
+                                 "top_p":  0.8,
+                                 "steps":  60,
+                                 "prompt":  "Voce implementa UMA tarefa por vez do backlog do PROJETO.md desta pasta.\n\nProtocolo:\n1. Carregue as skills \u0027convencoes-electronica\u0027 e \u0027identidade-shopee\u0027 antes de escrever codigo.\n2. Localize a PRIMEIRA tarefa marcada com \u0027- [ ]\u0027 no backlog.\n3. Leia os arquivos que vai alterar antes de edita-los. Nunca edite as cegas.\n4. Implemente a menor mudanca que resolve. Nao refatore o que ja funciona.\n5. Rode \u0027npm run build\u0027. Se falhar, conserte ate passar.\n6. So entao edite o PROJETO.md trocando aquele \u0027- [ ]\u0027 por \u0027- [x]\u0027.\n7. Encerre com uma linha dizendo o que fez e qual e a proxima da fila.\n\nRegras: nenhuma dependencia nova, interface em portugues, uma tarefa por vez.\nSe a tarefa estiver ambigua, escolha a interpretacao mais simples e siga."
+                             },
+                  "ui":  {
+                             "description":  "Ajustes de layout, espacamento e identidade visual Shopee",
+                             "mode":  "primary",
+                             "temperature":  0.7,
+                             "top_p":  0.8,
+                             "steps":  60,
+                             "prompt":  "Voce cuida da interface da Electronica Store.\n\nSempre carregue a skill \u0027identidade-shopee\u0027 antes de mexer em qualquer estilo,\ne use os tokens CSS em vez de valores fixos.\n\nPense na estrutura antes de editar: qual grade, quantas colunas em cada largura,\nqual espacamento da escala (24 / 40 / 64). Cuide de 1440, 768 e 390 quando a\nmudanca for estrutural.\n\nNao adicione dependencias. Nao mude comportamento, so aparencia, a menos que a\ntarefa peca explicitamente."
+                         },
+                  "dados":  {
+                                "description":  "Cria e expande os dados mocados em src/data, mantendo tipos e coerencia",
+                                "mode":  "primary",
+                                "temperature":  0.8,
+                                "top_p":  0.9,
+                                "steps":  40,
+                                "prompt":  "Voce cuida dos dados mocados em src/data.\n\nCarregue a skill \u0027convencoes-electronica\u0027 antes de comecar.\n\nPrincipios:\n- O tipo mora junto do dado e e exportado dali.\n- Ao adicionar um campo ao tipo, preencha em TODOS os registros existentes.\n- Dados precisam ser plausiveis: nomes reais de produto, precos coerentes com a\n  categoria, avaliacoes entre 3.5 e 5, datas no passado.\n- Variedade importa: nao repita o mesmo padrao em todos os registros.\n- Nada de lorem ipsum. Texto em portugues.\n\nDepois de alterar, rode \u0027npm run build\u0027 para garantir que nenhum consumidor\nquebrou com o tipo novo."
+                            },
+                  "revisor":  {
+                                  "description":  "Revisa mudancas recentes contra as convencoes do projeto, sem editar nada",
+                                  "mode":  "all",
+                                  "temperature":  0.4,
+                                  "top_p":  0.9,
+                                  "steps":  25,
+                                  "permission":  {
+                                                     "edit":  "deny",
+                                                     "bash":  "allow"
+                                                 },
+                                  "prompt":  "Voce revisa codigo da Electronica Store. Voce NAO edita arquivos.\n\nCarregue as skills \u0027convencoes-electronica\u0027 e \u0027identidade-shopee\u0027.\n\nVerifique e relate objetivamente:\n- dependencia nova adicionada (proibido)\n- hex escrito direto no componente em vez do token CSS\n- formatacao de preco ou data sem passar por src/lib/format.ts\n- localStorage sem try/catch ou sem o prefixo \u0027electronica:\u0027\n- provider exportando algo que nao e componente (quebra o fast refresh)\n- texto de interface em ingles\n- codigo duplicado que ja existe em src/lib\n\nRode \u0027npm run build\u0027 e \u0027npm run lint\u0027 e reporte o resultado.\n\nSaida: lista curta de problemas, cada um com arquivo, linha e o porque.\nSe estiver tudo certo, diga isso em uma linha. Nao invente problemas."
+                              },
+                  "explorador":  {
+                                     "description":  "Responde onde algo esta implementado no projeto, somente leitura",
+                                     "mode":  "all",
+                                     "temperature":  0.4,
+                                     "top_p":  0.9,
+                                     "steps":  20,
+                                     "permission":  {
+                                                        "edit":  "deny",
+                                                        "bash":  "allow"
+                                                    },
+                                     "prompt":  "Voce responde perguntas sobre onde as coisas estao neste projeto.\n\nNao edite nada. Use busca por conteudo e leitura de trechos, nao leia arquivos\ninteiros sem necessidade.\n\nResponda com caminho de arquivo e numero de linha. Seja curto: o que foi\nperguntado, onde esta, e nada alem disso."
+                                 }
+              },
+    "command":  {
+                    "proxima":  {
+                                    "description":  "Executa a proxima tarefa nao marcada do backlog",
+                                    "agent":  "tarefa",
+                                    "template":  "Execute a proxima tarefa nao marcada do backlog do PROJETO.md, seguindo seu protocolo."
+                                },
+                    "status":  {
+                                   "description":  "Mostra o progresso do backlog e o estado do build",
+                                   "agent":  "explorador",
+                                   "template":  "Leia o PROJETO.md e responda em poucas linhas, sem editar nada:\n- quantas tarefas concluidas e quantas abertas\n- em qual fase estamos\n- qual e a proxima tarefa da fila\nDepois rode \u0027npm run build\u0027 e \u0027npm run lint\u0027 e diga se passam."
+                               },
+                    "reparar":  {
+                                    "description":  "Conserta o build quebrado, sem adicionar funcionalidades",
+                                    "agent":  "tarefa",
+                                    "template":  "Rode \u0027npm run build\u0027, leia os erros e corrija-os. Nao adicione funcionalidades novas nem dependencias: apenas faca a compilacao voltar a passar. Ao final rode o build de novo para confirmar."
+                                },
+                    "revisar":  {
+                                    "description":  "Revisa as mudancas recentes contra as convencoes",
+                                    "agent":  "revisor",
+                                    "template":  "Revise as mudancas mais recentes do projeto. Se houver git, use o diff; se nao, revise os arquivos modificados por ultimo. Reporte apenas problemas reais."
+                                },
+                    "fase":  {
+                                 "description":  "Resume o que falta na fase atual do backlog",
+                                 "agent":  "explorador",
+                                 "template":  "Leia o backlog do PROJETO.md e liste as tarefas ainda abertas da fase atual, em ordem, com uma linha cada. Nao edite nada."
+                             }
+                },
+    "lsp":  true,
+    "watcher":  {
+                    "ignore":  [
+                                   "node_modules/**",
+                                   "dist/**",
+                                   ".opencode/**"
+                               ]
+                },
+    "permission":  {
+                       "edit":  "allow",
+                       "bash":  "allow"
+                   }
+}
