@@ -20,7 +20,7 @@ export default function Coupons() {
   const collectedCount = collected.length;
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 pb-16 pt-8">
+    <main className="mx-auto w-full max-w-5xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-ink">Central de Cupons</h1>
         <p className="mt-1 text-sm text-ink-soft">

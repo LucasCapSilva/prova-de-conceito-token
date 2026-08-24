@@ -70,10 +70,10 @@ export default function ChatWidget() {
   return (
     <>
       {open && (
-        <div className="fixed bottom-20 right-4 z-40 w-80 max-w-[calc(100vw-2rem)] card overflow-hidden rounded-lg shadow-lg">
+        <div className="fixed inset-0 z-40 flex flex-col bg-surface sm:inset-auto sm:bottom-20 sm:right-4 sm:h-auto sm:w-80 sm:max-w-[calc(100vw-2rem)] sm:overflow-hidden sm:rounded-lg sm:shadow-lg">
           {active && seller ? (
             <>
-              <header className="flex items-center gap-2 border-b border-line bg-brand-soft px-3 py-2">
+              <header className="flex items-center gap-2 border-b border-line bg-brand-soft px-3 py-2 sm:py-2.5">
                 <button
                   type="button"
                   onClick={backToList}
@@ -95,11 +95,19 @@ export default function ChatWidget() {
                     {typing ? "digitando…" : "online"}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Fechar chat"
+                  className="text-lg font-bold text-ink-soft hover:text-ink sm:hidden"
+                >
+                  ✕
+                </button>
               </header>
 
               <div
                 ref={scrollRef}
-                className="h-72 overflow-y-auto bg-surface px-3 py-3"
+                className="flex-1 overflow-y-auto bg-surface px-3 py-3 sm:h-72 sm:flex-none"
               >
                 {messages.length === 0 && !typing ? (
                   <p className="py-6 text-center text-xs text-ink-soft">
@@ -148,7 +156,7 @@ export default function ChatWidget() {
               </div>
 
               <form
-                className="flex items-center gap-2 border-t border-line bg-white px-3 py-2"
+                className="flex items-center gap-2 border-t border-line bg-white px-3 py-2 sm:py-2.5"
                 onSubmit={(e) => {
                   e.preventDefault();
                   send();
@@ -162,12 +170,12 @@ export default function ChatWidget() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   placeholder="Digite sua mensagem…"
-                  className="min-w-0 flex-1 rounded-[6px] border border-line bg-surface px-3 py-1.5 text-xs text-ink outline-none focus:border-brand"
+                  className="min-w-0 flex-1 rounded-[6px] border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-brand sm:py-1.5 sm:text-xs"
                 />
                 <button
                   type="submit"
                   disabled={!draft.trim()}
-                  className="btn-brand rounded-[6px] px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+                  className="btn-brand rounded-[6px] px-4 py-2 text-sm font-bold disabled:opacity-40 sm:px-3 sm:py-1.5 sm:text-xs"
                 >
                   Enviar
                 </button>
@@ -175,15 +183,25 @@ export default function ChatWidget() {
             </>
           ) : (
             <>
-              <header className="border-b border-line bg-brand-soft px-3 py-2">
-                <p className="text-sm font-bold text-ink">
-                  Chat com vendedores
-                </p>
-                <p className="text-[11px] text-ink-soft">
-                  Escolha uma loja para conversar
-                </p>
+              <header className="flex items-center justify-between border-b border-line bg-brand-soft px-3 py-2 sm:py-2.5">
+                <div>
+                  <p className="text-sm font-bold text-ink">
+                    Chat com vendedores
+                  </p>
+                  <p className="text-[11px] text-ink-soft">
+                    Escolha uma loja para conversar
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Fechar chat"
+                  className="text-lg font-bold text-ink-soft hover:text-ink sm:hidden"
+                >
+                  ✕
+                </button>
               </header>
-              <ul className="max-h-80 overflow-y-auto">
+              <ul className="flex-1 overflow-y-auto sm:max-h-80 sm:flex-none">
                 {SELLERS.map((s) => {
                   const last = lastOf(chatFor(s.id));
                   return (
@@ -194,18 +212,18 @@ export default function ChatWidget() {
                       <button
                         type="button"
                         onClick={() => pickSeller(s.id)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-brand-soft"
+                        className="flex w-full items-center gap-2 px-3 py-3 text-left transition hover:bg-brand-soft sm:py-2"
                       >
                         <SmartImage
                           src={s.logo}
                           alt=""
-                          className="size-9 shrink-0 rounded object-cover"
+                          className="size-10 shrink-0 rounded object-cover sm:size-9"
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-semibold text-ink">
+                          <span className="block truncate text-sm font-semibold text-ink sm:text-xs">
                             {s.name}
                           </span>
-                          <span className="block truncate text-[11px] text-ink-soft">
+                          <span className="block truncate text-xs text-ink-soft sm:text-[11px]">
                             {last ? last.text : "Iniciar conversa…"}
                           </span>
                         </span>

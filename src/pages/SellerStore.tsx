@@ -35,7 +35,7 @@ export default function SellerStore() {
     : seller.rating;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
       <Breadcrumbs
         items={[{ label: "Início", to: "/" }, { label: seller.name }]}
       />
