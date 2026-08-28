@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PRODUCTS, CATEGORIES } from "../data/products";
 import ProductCard from "../components/ProductCard";
@@ -6,6 +7,8 @@ import RecentlyViewed from "../components/RecentlyViewed";
 import FlashSale from "../components/FlashSale";
 import BannerCarousel, { type Banner } from "../components/BannerCarousel";
 import PersonalizedPicks from "../components/PersonalizedPicks";
+import { useCart, cartIsAbandoned } from "../context/cartCore";
+import { formatBRL } from "../lib/format";
 
 const BANNERS: Banner[] = [
   {
@@ -79,9 +82,9 @@ function Promo({
   className?: string;
 }) {
   const tones: Record<PromoTone, string> = {
-    brand: "bg-gradient-to-br from-brand to-[#ff6b3d]",
+    brand: "bg-gradient-to-br from-brand to-[#c2551e]",
     dark: "bg-ink",
-    teal: "bg-gradient-to-br from-ship to-[#00a88f]",
+    teal: "bg-gradient-to-br from-ship to-[#005f4e]",
   };
   return (
     <Link
@@ -103,6 +106,9 @@ function Promo({
 }
 
 export default function Home() {
+  const { items, count, subtotal } = useCart();
+  const [enteredAt] = useState(() => Date.now());
+  const abandoned = cartIsAbandoned(items, enteredAt);
   const featured = PRODUCTS.slice(0, 8);
   const cats = CATEGORIES.filter((c) => c.key !== "todos");
 
@@ -110,6 +116,23 @@ export default function Home() {
     <div>
       {/* HERO BANNERS */}
       <section className="mx-auto max-w-7xl px-4 pt-32 sm:px-6 sm:pt-28">
+        {abandoned && (
+          <div
+            role="status"
+            className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-brand/30 bg-brand-soft px-4 py-2.5 text-sm text-ink"
+          >
+            <span>
+              Você deixou {count} {count === 1 ? "item" : "itens"} no carrinho
+              há mais de um dia ({formatBRL(subtotal)}).
+            </span>
+            <Link
+              to="/carrinho"
+              className="shrink-0 font-semibold text-brand hover:underline"
+            >
+              Revisar carrinho →
+            </Link>
+          </div>
+        )}
         <Reveal y={20}>
           <BannerCarousel banners={BANNERS} />
         </Reveal>

@@ -4,19 +4,19 @@
   --font-sans: "Inter", system-ui, sans-serif;
   --font-display: "Space Grotesk", system-ui, sans-serif;
 
-  --color-brand: #ee4d2d;
-  --color-brand-dark: #d73211;
+  --color-brand: #b5290b;
+  --color-brand-dark: #8f2108;
   --color-brand-soft: #fff0ed;
-  --color-header-from: #f53d2d;
-  --color-header-to: #ff6633;
+  --color-header-from: #b5290b;
+  --color-header-to: #c2551e;
   --color-page: #f5f5f5;
   --color-surface: #ffffff;
   --color-line: #e5e5e5;
   --color-ink: #222222;
-  --color-ink-soft: #757575;
-  --color-star: #ffce3d;
+  --color-ink-soft: #6e6e6e;
+  --color-star: #b45309;
   --color-tag: #ffd839;
-  --color-ship: #00bfa5;
+  --color-ship: #00695b;
 
   --animate-spin-slow: spin 8s linear infinite;
 }
@@ -27,7 +27,75 @@
   --color-line: #3a3a3a;
   --color-ink: #f0f0f0;
   --color-ink-soft: #a3a3a3;
-  --color-brand-soft: rgba(238, 77, 45, 0.18);
+  --color-brand: #ff8a50;
+  --color-brand-dark: #ff9e64;
+  --color-brand-soft: rgba(255, 138, 80, 0.16);
+  --color-header-from: #b5290b;
+  --color-header-to: #c2551e;
+  --color-star: #f59e0b;
+  --color-tag: #4a3a06;
+  --color-ship: #2dd4bf;
+}
+
+[data-theme="dark"] .btn-brand {
+  color: #141414;
+}
+[data-theme="dark"] .btn-brand:hover {
+  color: #141414;
+}
+[data-theme="dark"] .bg-brand.text-white {
+  color: #141414;
+}
+[data-theme="dark"] .bg-ship.text-white {
+  color: #141414;
+}
+[data-theme="dark"] .bg-ink.text-white {
+  color: #121212;
+}
+[data-theme="dark"] ::selection {
+  color: #141414;
+}
+[data-theme="dark"] .hover\:bg-brand:hover {
+  color: #141414;
+}
+
+[data-theme="contrast"] {
+  --color-page: #ffffff;
+  --color-surface: #ffffff;
+  --color-line: #000000;
+  --color-ink: #000000;
+  --color-ink-soft: #333333;
+  --color-brand: #a10000;
+  --color-brand-dark: #7c0000;
+  --color-brand-soft: #ffe0d5;
+  --color-header-from: #a10000;
+  --color-header-to: #7c0000;
+  --color-star: #8a5b00;
+  --color-tag: #ffd839;
+  --color-ship: #004d40;
+}
+
+[data-theme="contrast"] * {
+  box-shadow: none !important;
+}
+
+[data-theme="contrast"] :focus-visible {
+  outline: 3px solid #000000 !important;
+  outline-offset: 2px;
+}
+
+[data-theme="contrast"] .card {
+  border: 2px solid #000000;
+}
+
+[data-theme="contrast"] .card:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+[data-theme="contrast"] .btn-brand {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
 }
 
 @keyframes marquee {

@@ -1,4 +1,6 @@
-const KEY = "electronica:returns";
+import { read, write } from "./storage";
+
+const KEY = "returns";
 
 export type ReturnStatus = "aberta" | "analise" | "aprovada" | "concluida";
 
@@ -60,14 +62,8 @@ export const RETURN_STATUS_LABEL: Record<ReturnStatus, string> = {
 };
 
 function load(): ReturnRequest[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ReturnRequest[]) : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  return Array.isArray(raw) ? (raw as ReturnRequest[]) : [];
 }
 
 export function getReturns(): ReturnRequest[] {
@@ -100,10 +96,6 @@ export function createReturn(input: {
     ...input,
   };
   all.unshift(req);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(all));
-  } catch {
-    /* storage indisponível — ignora */
-  }
+  write(KEY, all);
   return req;
 }

@@ -1,12 +1,20 @@
 import { createContext, useContext } from "react";
 import type { Product } from "../data/products";
-import { unitPriceFor } from "../lib/variants";
+import { unitPriceFor, priceChange, type PriceChange } from "../lib/variants";
+
+export type { PriceChange };
 
 export interface CartItem {
   lineId: string;
   product: Product;
   qty: number;
   variantKey: string | null;
+  addedAt: number;
+  addedPrice: number;
+}
+
+export function priceChangeFor(item: CartItem): PriceChange | null {
+  return priceChange(item.addedPrice, unitPriceFor(item.product, item.variantKey));
 }
 
 export interface CartContextValue {
@@ -43,4 +51,12 @@ export function cartSubtotal(items: CartItem[]): number {
     (acc, i) => acc + i.qty * unitPriceFor(i.product, i.variantKey),
     0
   );
+}
+
+export const ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
+
+export function cartIsAbandoned(items: CartItem[], now: number): boolean {
+  if (items.length === 0) return false;
+  const oldest = items.reduce((acc, i) => Math.min(acc, i.addedAt), Infinity);
+  return Number.isFinite(oldest) && now - oldest >= ABANDONED_AFTER_MS;
 }

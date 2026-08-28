@@ -1,3 +1,5 @@
+import { read, write } from "./storage";
+
 export interface ProductQuestion {
   id: string;
   productId: string;
@@ -9,25 +11,15 @@ export interface ProductQuestion {
   answeredBy?: string;
 }
 
-const KEY = "electronica:questions";
+const KEY = "questions";
 
 function load(): ProductQuestion[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ProductQuestion[]) : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  return Array.isArray(raw) ? (raw as ProductQuestion[]) : [];
 }
 
 function persist(all: ProductQuestion[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(all));
-  } catch {
-    /* storage indisponível — ignora */
-  }
+  write(KEY, all);
 }
 
 export function getQuestions(): ProductQuestion[] {

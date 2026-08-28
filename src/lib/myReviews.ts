@@ -1,16 +1,11 @@
 import type { Review } from "../data/reviews";
+import { read, write } from "./storage";
 
-const KEY = "electronica:myreviews";
+const KEY = "myreviews";
 
 export function getMyReviews(): Review[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Review[]) : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  return Array.isArray(raw) ? (raw as Review[]) : [];
 }
 
 export function myReviewsFor(productId: string): Review[] {
@@ -29,10 +24,6 @@ export function addMyReview(review: Review): Review {
   const idx = all.findIndex((r) => r.id === review.id);
   if (idx >= 0) all[idx] = review;
   else all.unshift(review);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(all));
-  } catch {
-    /* storage indisponível — ignora */
-  }
+  write(KEY, all);
   return review;
 }

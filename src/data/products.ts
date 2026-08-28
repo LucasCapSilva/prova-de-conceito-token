@@ -46,12 +46,16 @@ export interface Product {
   stock: number;
   freeShipping: boolean;
   condition: Condition;
+  warrantyMonths: number;
+  freeReturn: boolean;
+  exchangeDays: number;
   installments: Installment;
   variants?: VariantGroup[];
   featured?: boolean;
+  ean?: string;
 }
 
-import { SELLERS } from "./sellers";
+import { SELLERS } from "./sellers.ts";
 
 const lf = (kw: string) => `https://loremflickr.com/900/900/${kw}`;
 
@@ -64,6 +68,18 @@ function hashId(id: string): number {
     h = Math.imul(h, 16777619) >>> 0;
   }
   return h >>> 0;
+}
+
+function eanFor(id: string): string {
+  let x = hashId(id) || 1;
+  let s = "7891";
+  while (s.length < 12) {
+    x = Math.imul(x, 48271) % 2147483647;
+    s += String(x % 10);
+  }
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += Number(s[i]) * (i % 2 === 0 ? 1 : 3);
+  return s + String((10 - (sum % 10)) % 10);
 }
 
 export const CATEGORIES: { key: Category | "todos"; label: string }[] = [
@@ -693,6 +709,10 @@ function buildProduct([id, name, price, oldPrice, rating, reviews, badge, descri
   const seller = SELLERS[h % SELLERS.length];
   const lowStock = h % 7 === 0;
   const stock = lowStock ? 2 + (h % 5) : 15 + (h % 80);
+  const condition: Condition = h % 12 === 0 ? "usado" : "novo";
+  const warrantyMonths = condition === "usado" ? 3 : [3, 6, 12, 24][h % 4];
+  const freeReturn = h % 6 !== 0;
+  const exchangeDays = h % 3 === 0 ? 30 : 7;
   return {
     id,
     name,
@@ -711,9 +731,13 @@ function buildProduct([id, name, price, oldPrice, rating, reviews, badge, descri
     sellerId: seller.id,
     stock,
     freeShipping: h % 5 !== 0,
-    condition: h % 12 === 0 ? "usado" : "novo",
+    condition,
+    warrantyMonths,
+    freeReturn,
+    exchangeDays,
     installments: installmentsFor(price),
     variants: VARIANTS[id],
+    ean: eanFor(id),
   };
 }
 
@@ -725,6 +749,21 @@ export const BRANDS: string[] = Array.from(
   new Set(PRODUCTS.map((p) => p.brand))
 ).sort();
 
+export function brandSlug(brand: string): string {
+  return brand
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export function getProduct(id: string): Product | undefined {
   return PRODUCTS.find((p) => p.id === id);
+}
+
+export function findProductByEan(code: string): Product | undefined {
+  const clean = code.replace(/[^0-9]/g, "");
+  if (clean.length !== 13) return undefined;
+  return PRODUCTS.find((p) => p.ean === clean);
 }

@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { cancelOrder, getOrder, type Order, type OrderItem } from "../lib/orders";
+import { cancelOrder, getOrder, linkOrderToAccount, type Order, type OrderItem } from "../lib/orders";
+import { findAccountByEmail, updateAccount } from "../lib/accounts";
+import { read, write } from "../lib/storage";
+import { useAuth } from "../context/authCore";
+import { useToasts } from "../context/toastsCore";
 import { createReturn, getReturnForItem } from "../lib/returns";
 import { addMyReview, getMyReviewForItem } from "../lib/myReviews";
+import { addSellerRating, getRatingFor } from "../lib/sellerRatings";
+import { getProduct } from "../data/products";
 import { formatBRL, formatDate } from "../lib/format";
+import { slotLabel } from "../lib/schedule";
 import SmartImage from "../components/SmartImage";
+import PasswordInput from "../components/PasswordInput";
+import PasswordStrength, { evaluatePassword } from "../components/PasswordStrength";
 
 const TRACK_STEPS = [
   "Confirmado",
@@ -12,6 +21,13 @@ const TRACK_STEPS = [
   "Enviado",
   "Em trânsito",
   "Entregue",
+] as const;
+
+const PICKUP_STEPS = [
+  "Confirmado",
+  "Preparando",
+  "Pronto p/ retirada",
+  "Retirado",
 ] as const;
 
 const TRACK_CITIES = [
@@ -36,6 +52,15 @@ function seededInt(seed: number, salt: number): number {
 }
 
 function timelineStep(o: Order): number {
+  if (o.pickup) {
+    if (o.status === "delivered" || o.status === "shipped") return 3;
+    if (o.status === "processing") return 1;
+    const mins = (Date.now() - new Date(o.createdAt).getTime()) / 60000;
+    if (mins >= 10) return 3;
+    if (mins >= 5) return 2;
+    if (mins >= 2) return 1;
+    return 0;
+  }
   if (o.status === "delivered") return 4;
   if (o.status === "shipped") return 3;
   if (o.status === "processing") return 1;
@@ -58,6 +83,8 @@ function trackingEvents(o: Order, step: number): TrackEvent[] {
   const created = new Date(o.createdAt).getTime();
   const eta = new Date(o.estimatedDate).getTime();
   const span = Math.max(eta - created, 3600000);
+  const steps = o.pickup ? PICKUP_STEPS : TRACK_STEPS;
+  const last = steps.length - 1;
   const place = [
     "Centro de operações",
     "Centro de distribuição",
@@ -65,14 +92,19 @@ function trackingEvents(o: Order, step: number): TrackEvent[] {
     "Hub logístico regional",
     "Endereço do destinatário",
   ];
-  return TRACK_STEPS.map((label, i) => {
+  const pointLabel = o.pickup
+    ? `${o.pickup.point.name} — ${o.pickup.point.city}/${o.pickup.point.state}`
+    : null;
+  return steps.map((label, i) => {
     const jitterMin = seededInt(seed, i + 1) % 45;
-    const date = new Date(created + (span * i) / 4 + jitterMin * 60000);
+    const date = new Date(created + (span * i) / last + jitterMin * 60000);
     const city = TRACK_CITIES[seededInt(seed, 50 + i) % TRACK_CITIES.length];
+    const location =
+      pointLabel && i >= last - 1 ? pointLabel : `${place[i]} — ${city}`;
     return {
       label,
       date,
-      location: `${place[i]} — ${city}`,
+      location,
       done: i <= step,
     };
   });
@@ -85,10 +117,10 @@ function timeOf(iso: Date) {
   });
 }
 
-function Timeline({ step }: { step: number }) {
+function Timeline({ step, labels }: { step: number; labels: readonly string[] }) {
   return (
     <ol className="flex items-start">
-      {TRACK_STEPS.map((label, i) => {
+      {labels.map((label, i) => {
         const done = i <= step;
         const active = i === step;
         return (
@@ -197,6 +229,93 @@ function ReviewForm({
   );
 }
 
+function StarRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-xs text-ink-soft">{label}</span>
+      <div className="flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(n)}
+            aria-label={`${label}: ${n} de 5 estrelas`}
+            className={`text-base leading-none transition ${
+              n <= value ? "text-star" : "text-line hover:text-ink-soft"
+            }`}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SellerRatingForm({
+  orderId,
+  sellerId,
+  sellerName,
+  onDone,
+}: {
+  orderId: string;
+  sellerId: string;
+  sellerName: string;
+  onDone: (sellerId: string) => void;
+}) {
+  const [service, setService] = useState(0);
+  const [packaging, setPackaging] = useState(0);
+  const [delivery, setDelivery] = useState(0);
+  const [comment, setComment] = useState("");
+  const ready = service > 0 && packaging > 0 && delivery > 0;
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!ready) return;
+    addSellerRating({
+      orderId,
+      sellerId,
+      service,
+      packaging,
+      delivery,
+      comment: comment.trim() ? comment.trim() : undefined,
+    });
+    onDone(sellerId);
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      <p className="text-sm font-semibold text-ink">{sellerName}</p>
+      <StarRow label="Atendimento" value={service} onChange={setService} />
+      <StarRow label="Embalagem" value={packaging} onChange={setPackaging} />
+      <StarRow label="Prazo" value={delivery} onChange={setDelivery} />
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        rows={2}
+        placeholder="Deixe um comentário sobre a experiência (opcional)"
+        aria-label={`Comentário sobre ${sellerName}`}
+        className="w-full rounded border border-line bg-surface px-2 py-1.5 text-sm text-ink placeholder:text-ink-soft/60"
+      />
+      <button
+        type="submit"
+        disabled={!ready}
+        className="btn-brand rounded-[6px] px-4 py-1.5 text-xs font-bold disabled:opacity-40"
+      >
+        Avaliar vendedor
+      </button>
+    </form>
+  );
+}
+
 const RETURN_REASONS = [
   "Produto chegou danificado",
   "Produto não corresponde à descrição",
@@ -277,9 +396,206 @@ function ReturnForm({
   );
 }
 
+const DISMISS_KEY = "accountPromptDismissed";
+
+function GuestAccountPrompt({ order, onLinked }: { order: Order; onLinked: () => void }) {
+  const { user, register } = useAuth();
+  const { toast } = useToasts();
+  const [dismissed, setDismissed] = useState(
+    () => read<string[]>(DISMISS_KEY, []).includes(order.id) || Boolean(order.accountId),
+  );
+  const [name, setName] = useState(order.address.name);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [serverError, setServerError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (user || dismissed) return null;
+
+  const inputClass = (err: string | undefined) =>
+    `h-10 w-full rounded-[6px] border bg-surface px-3 text-sm text-ink outline-none placeholder:text-ink-soft/60 focus:border-brand ${
+      err ? "border-[#D93026]" : "border-line"
+    }`;
+
+  function validate() {
+    const e: Record<string, string> = {};
+    if (name.trim().length < 2) e.name = "Informe seu nome completo.";
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) e.email = "Informe um e-mail válido.";
+    if (evaluatePassword(password).level === "fraca")
+      e.password = "A senha é fraca. Use 8+ caracteres com letras, números e símbolos.";
+    if (!confirm || confirm !== password) e.confirm = "As senhas não conferem.";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function submit(ev: FormEvent) {
+    ev.preventDefault();
+    if (!validate() || busy) return;
+    setBusy(true);
+    setServerError("");
+    const res = await register(name.trim(), email.trim(), password);
+    if (!res.ok) {
+      setServerError(res.error ?? "Não foi possível criar a conta.");
+      setBusy(false);
+      return;
+    }
+    const account = findAccountByEmail(email.trim());
+    if (account) {
+      if (!order.accountId) linkOrderToAccount(order.id, account.id);
+      if (order.address.cpf && !account.cpf) {
+        updateAccount(account.id, { cpf: order.address.cpf });
+      }
+    }
+    toast.success("Conta criada! Seu pedido ficou vinculado à sua conta.");
+    onLinked();
+  }
+
+  function dismiss() {
+    const list = read<string[]>(DISMISS_KEY, []);
+    if (!list.includes(order.id)) write(DISMISS_KEY, [...list, order.id]);
+    setDismissed(true);
+  }
+
+  return (
+    <section className="card mb-4 rounded-lg border border-brand/30 bg-brand-soft p-4 sm:p-5" aria-label="Criar conta">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-black text-ink">👤 Você comprou sem criar conta</h2>
+          <p className="mt-1 text-xs text-ink-soft">
+            Crie sua conta para acompanhar pedidos, salvar favoritos e usar cupons. Seus dados já estão preenchidos.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Fechar convite para criar conta"
+          className="text-lg font-bold leading-none text-ink-soft transition hover:text-ink"
+        >
+          ×
+        </button>
+      </div>
+      <form onSubmit={submit} noValidate className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor="guest-name" className="mb-1 block text-xs font-bold text-ink">
+            Nome
+          </label>
+          <input
+            id="guest-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoComplete="name"
+            aria-invalid={errors.name ? true : undefined}
+            aria-describedby={errors.name ? "guest-name-err" : undefined}
+            className={inputClass(errors.name)}
+          />
+          {errors.name && (
+            <span id="guest-name-err" role="alert" className="mt-1 block text-xs font-semibold text-[#D93026]">
+              {errors.name}
+            </span>
+          )}
+        </div>
+        <div>
+          <label htmlFor="guest-email" className="mb-1 block text-xs font-bold text-ink">
+            E-mail
+          </label>
+          <input
+            id="guest-email"
+            name="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            placeholder="voce@exemplo.com"
+            aria-invalid={errors.email ? true : undefined}
+            aria-describedby={errors.email ? "guest-email-err" : undefined}
+            className={inputClass(errors.email)}
+          />
+          {errors.email && (
+            <span id="guest-email-err" role="alert" className="mt-1 block text-xs font-semibold text-[#D93026]">
+              {errors.email}
+            </span>
+          )}
+        </div>
+        <div>
+          <label htmlFor="guest-password" className="mb-1 block text-xs font-bold text-ink">
+            Nova senha
+          </label>
+          <PasswordInput
+            id="guest-password"
+            name="password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="new-password"
+            placeholder="Crie uma senha"
+            invalid={Boolean(errors.password)}
+            describedBy="guest-password-err"
+          />
+          <PasswordStrength password={password} />
+          {errors.password && (
+            <span id="guest-password-err" role="alert" className="mt-1 block text-xs font-semibold text-[#D93026]">
+              {errors.password}
+            </span>
+          )}
+        </div>
+        <div>
+          <label htmlFor="guest-confirm" className="mb-1 block text-xs font-bold text-ink">
+            Confirmar senha
+          </label>
+          <PasswordInput
+            id="guest-confirm"
+            name="confirm"
+            value={confirm}
+            onChange={setConfirm}
+            autoComplete="new-password"
+            placeholder="Repita a senha"
+            invalid={Boolean(errors.confirm)}
+            describedBy="guest-confirm-err"
+          />
+          {errors.confirm && (
+            <span id="guest-confirm-err" role="alert" className="mt-1 block text-xs font-semibold text-[#D93026]">
+              {errors.confirm}
+            </span>
+          )}
+        </div>
+        {serverError && (
+          <p
+            role="alert"
+            className="rounded-[4px] border border-[#D93026]/30 bg-surface px-3 py-2 text-xs font-semibold text-[#D93026] sm:col-span-2"
+          >
+            {serverError}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={busy}
+          className="btn-brand w-full rounded-[6px] px-4 py-2.5 text-sm font-bold disabled:opacity-60 sm:col-span-2"
+        >
+          {busy ? "Criando conta…" : "Criar conta"}
+        </button>
+        <div className="text-center sm:col-span-2">
+          <button type="button" onClick={dismiss} className="text-xs font-bold text-ink-soft underline transition hover:text-ink">
+            Agora não
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export default function OrderDetail() {
   const { id } = useParams();
-  const order = useMemo(() => getOrder(id ?? ""), [id]);
+  const { user } = useAuth();
+  const [orderVersion, setOrderVersion] = useState(0);
+  const order = useMemo(() => getOrder(id ?? ""), [id, orderVersion]);
+  useEffect(() => {
+    if (!user?.id || !id) return;
+    const existing = getOrder(id);
+    if (!existing || existing.accountId) return;
+    linkOrderToAccount(id, user.id);
+    setOrderVersion((v) => v + 1);
+  }, [id, user]);
   const step = order ? timelineStep(order) : 0;
   const [reviewed, setReviewed] = useState<Record<string, boolean>>(() => {
     const m: Record<string, boolean> = {};
@@ -292,6 +608,27 @@ export default function OrderDetail() {
   });
   const markReviewed = (itemId: string) =>
     setReviewed((m) => ({ ...m, [itemId]: true }));
+  const [sellerRated, setSellerRated] = useState<Record<string, boolean>>(
+    () => {
+      const m: Record<string, boolean> = {};
+      if (order) {
+        for (const it of order.items) {
+          const p = getProduct(it.id);
+          if (p && getRatingFor(order.id, p.sellerId)) m[p.sellerId] = true;
+        }
+      }
+      return m;
+    },
+  );
+  const sellersInOrder = useMemo(() => {
+    if (!order) return [] as { id: string; name: string }[];
+    const seen = new Map<string, string>();
+    for (const it of order.items) {
+      const p = getProduct(it.id);
+      if (p && !seen.has(p.sellerId)) seen.set(p.sellerId, it.seller);
+    }
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [order]);
   const [cancelled, setCancelled] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [returnProtocols, setReturnProtocols] = useState<
@@ -357,6 +694,10 @@ export default function OrderDetail() {
         </button>
       </div>
 
+      {!order.accountId && (
+        <GuestAccountPrompt order={order} onLinked={() => setOrderVersion((v) => v + 1)} />
+      )}
+
       {cancelled || order.status === "cancelled" ? (
         <div className="card mb-4 rounded-lg border border-line p-5">
           <p className="text-sm font-bold text-rose-500">
@@ -372,10 +713,19 @@ export default function OrderDetail() {
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-bold text-ink">Rastreamento</h2>
             <span className="text-xs font-semibold text-ink-soft">
-              Previsão: {formatDate(order.estimatedDate)}
+              {order.pickup
+                ? "Pronto para retirada: "
+                : order.schedule
+                  ? "Entrega agendada: "
+                  : "Previsão: "}
+              {formatDate(order.estimatedDate)}
+              {order.schedule && ` · ${slotLabel(order.schedule.slot)}`}
             </span>
           </div>
-          <Timeline step={step} />
+          <Timeline
+            step={step}
+            labels={order.pickup ? PICKUP_STEPS : TRACK_STEPS}
+          />
           <ol className="mt-5">
             {trackingEvents(order, step).map((ev, i, arr) => (
               <li key={ev.label} className="flex gap-3">
@@ -497,11 +847,22 @@ export default function OrderDetail() {
               <dd>-{formatBRL(order.discount)}</dd>
             </div>
           )}
+          {order.gift && (
+            <div className="flex justify-between text-ink-soft">
+              <dt>Embrulho presente 🎁</dt>
+              <dd>{formatBRL(order.gift.fee)}</dd>
+            </div>
+          )}
           <div className="flex justify-between pt-1 text-base font-black text-ink">
             <dt>Total</dt>
             <dd>{formatBRL(order.total)}</dd>
           </div>
         </dl>
+        {order.gift?.message && (
+          <p className="mt-2 rounded bg-brand-soft px-3 py-2 text-xs italic text-ink">
+            Mensagem do presente: “{order.gift.message}”
+          </p>
+        )}
       </div>
 
       {order.status === "delivered" && (
@@ -615,19 +976,83 @@ export default function OrderDetail() {
       </div>
       )}
 
+      {order.status === "delivered" && !cancelled && (
+      <div className="card mb-4 rounded-lg p-5">
+        <h2 className="mb-2 text-sm font-bold text-ink">
+          Avaliar o vendedor
+        </h2>
+        <p className="mb-4 text-xs text-ink-soft">
+          Pedido entregue: avalie atendimento, embalagem e prazo. Sua nota
+          compõe a reputação da loja.
+        </p>
+        <ul className="divide-y divide-line">
+          {sellersInOrder.map((s) => (
+            <li key={s.id} className="py-4 first:pt-0 last:pb-0">
+              {sellerRated[s.id] ? (
+                <p className="rounded bg-brand-soft px-3 py-2 text-xs font-semibold text-brand">
+                  ✓ {s.name} — vendedor avaliado.{" "}
+                  <Link
+                    to={`/loja/${s.id}`}
+                    className="underline"
+                  >
+                    Ver loja
+                  </Link>
+                </p>
+              ) : (
+                <SellerRatingForm
+                  orderId={order.id}
+                  sellerId={s.id}
+                  sellerName={s.name}
+                  onDone={(sid) =>
+                    setSellerRated((m) => ({ ...m, [sid]: true }))
+                  }
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+      )}
+
       <div className="card rounded-lg p-5">
-        <h2 className="mb-2 text-sm font-bold text-ink">Endereço de entrega</h2>
-        <p className="text-sm text-ink-soft">
-          {order.address.name}
-          {order.address.cpf ? ` · CPF ${order.address.cpf}` : ""}
-        </p>
-        <p className="mt-1 text-sm text-ink-soft">
-          {order.address.street}, {order.address.number}
-          {order.address.complement ? ` · ${order.address.complement}` : ""}
-        </p>
-        <p className="mt-1 text-sm text-ink-soft">
-          {order.address.city}/{order.address.state} · CEP {order.address.cep}
-        </p>
+        {order.pickup ? (
+          <>
+            <h2 className="mb-2 text-sm font-bold text-ink">Ponto de coleta</h2>
+            <p className="text-sm text-ink">{order.pickup.point.name}</p>
+            <p className="mt-1 text-sm text-ink-soft">
+              {order.pickup.point.street}, {order.pickup.point.number} —{" "}
+              {order.pickup.point.neighborhood}
+            </p>
+            <p className="mt-1 text-sm text-ink-soft">
+              {order.pickup.point.city}/{order.pickup.point.state} · CEP{" "}
+              {order.pickup.point.cep}
+            </p>
+            <p className="mt-1 text-xs text-ink-soft">
+              Funcionamento: {order.pickup.point.hours}
+            </p>
+            <p className="mt-2 text-xs text-ink-soft">
+              Retirante: {order.address.name}
+              {order.address.cpf ? ` · CPF ${order.address.cpf}` : ""}
+            </p>
+          </>
+        ) : (
+          <>
+            <h2 className="mb-2 text-sm font-bold text-ink">
+              Endereço de entrega
+            </h2>
+            <p className="text-sm text-ink-soft">
+              {order.address.name}
+              {order.address.cpf ? ` · CPF ${order.address.cpf}` : ""}
+            </p>
+            <p className="mt-1 text-sm text-ink-soft">
+              {order.address.street}, {order.address.number}
+              {order.address.complement ? ` · ${order.address.complement}` : ""}
+            </p>
+            <p className="mt-1 text-sm text-ink-soft">
+              {order.address.city}/{order.address.state} · CEP {order.address.cep}
+            </p>
+          </>
+        )}
       </div>
 
       {nf && (
@@ -754,6 +1179,12 @@ export default function OrderDetail() {
                 <div className="flex justify-between text-ship">
                   <dt>Desconto</dt>
                   <dd>-{formatBRL(order.discount)}</dd>
+                </div>
+              )}
+              {order.gift && (
+                <div className="flex justify-between text-ink-soft">
+                  <dt>Embrulho presente</dt>
+                  <dd>{formatBRL(order.gift.fee)}</dd>
                 </div>
               )}
               <div className="flex justify-between text-base font-black text-ink">

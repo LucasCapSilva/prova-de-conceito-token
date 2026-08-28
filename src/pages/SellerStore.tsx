@@ -4,6 +4,7 @@ import { PRODUCTS } from "../data/products";
 import { getSeller } from "../data/sellers";
 import { followerCount } from "../lib/follows";
 import { formatCompact } from "../lib/format";
+import { sellerReputation } from "../lib/sellerRatings";
 import ProductCard from "../components/ProductCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import FollowButton from "../components/FollowButton";
@@ -33,6 +34,8 @@ export default function SellerStore() {
   const avgRating = items.length
     ? items.reduce((acc, p) => acc + p.rating, 0) / items.length
     : seller.rating;
+  const rep = sellerReputation(seller.id);
+  const shownRating = rep ? (avgRating + rep.overall) / 2 : avgRating;
 
   return (
     <div className="mx-auto max-w-6xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
@@ -45,6 +48,8 @@ export default function SellerStore() {
           <SmartImage
             src={seller.logo}
             alt={seller.name}
+            width={200}
+            height={200}
             className="size-24 shrink-0 rounded-xl object-cover"
           />
           <div className="flex-1">
@@ -63,7 +68,7 @@ export default function SellerStore() {
               <span>
                 <span className="text-star">★</span>{" "}
                 <span className="font-semibold text-ink">
-                  {avgRating.toFixed(1)}
+                  {shownRating.toFixed(1)}
                 </span>{" "}
                 <span className="text-ink-soft">reputação</span>
               </span>
@@ -86,6 +91,12 @@ export default function SellerStore() {
                 <span className="text-ink-soft">seguidores</span>
               </span>
             </div>
+            {rep && (
+              <p className="mt-2 text-xs text-ink-soft">
+                Sua avaliação: atendimento {rep.service.toFixed(1)} · embalagem{" "}
+                {rep.packaging.toFixed(1)} · prazo {rep.delivery.toFixed(1)}
+              </p>
+            )}
           </div>
           <div className="shrink-0">
             <FollowButton sellerId={seller.id} />

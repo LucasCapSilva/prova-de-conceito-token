@@ -1,3 +1,5 @@
+import { read, write } from "./storage";
+
 export interface ChatMessage {
   id: string;
   sellerId: string;
@@ -6,34 +8,24 @@ export interface ChatMessage {
   at: string;
 }
 
-const KEY = "electronica:chat";
+const KEY = "chat";
 
 function loadAll(): Record<string, ChatMessage[]> {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, ChatMessage[]> = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (Array.isArray(v)) {
-        out[k] = (v as ChatMessage[]).filter(
-          (m) => m && typeof m.id === "string" && typeof m.text === "string"
-        );
-      }
+  const parsed: unknown = read<unknown>(KEY, null);
+  if (!parsed || typeof parsed !== "object") return {};
+  const out: Record<string, ChatMessage[]> = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (Array.isArray(v)) {
+      out[k] = (v as ChatMessage[]).filter(
+        (m) => m && typeof m.id === "string" && typeof m.text === "string"
+      );
     }
-    return out;
-  } catch {
-    return {};
   }
+  return out;
 }
 
 function persistAll(all: Record<string, ChatMessage[]>) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(all));
-  } catch {
-    /* sem persistência */
-  }
+  write(KEY, all);
 }
 
 export function chatFor(sellerId: string): ChatMessage[] {

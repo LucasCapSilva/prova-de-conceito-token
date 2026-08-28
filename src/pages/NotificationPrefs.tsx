@@ -4,6 +4,7 @@ import {
   setNotifPref,
   type NotifKind,
 } from "../lib/notifs";
+import { TEXT_SIZES, useTextSize, type TextSize } from "../lib/textSize";
 
 const ROWS: { kind: NotifKind; label: string; desc: string }[] = [
   {
@@ -25,6 +26,7 @@ const ROWS: { kind: NotifKind; label: string; desc: string }[] = [
 
 export default function NotificationPrefs() {
   const [prefs, setPrefs] = useState(() => getNotifPrefs());
+  const [size, setSize] = useTextSize();
 
   const toggle = (kind: NotifKind) => {
     setPrefs(setNotifPref(kind, !prefs[kind]));
@@ -69,6 +71,41 @@ export default function NotificationPrefs() {
                 />
               </button>
             </div>
+          );
+        })}
+      </div>
+
+      <h2 className="mt-6 mb-2 text-lg font-black tracking-tight text-ink">
+        Tamanho do texto
+      </h2>
+      <p className="mb-3 text-sm text-ink-soft">
+        Ajuste o tamanho do texto em todo o site. A mudança vale na hora e
+        fica salva.
+      </p>
+      <div
+        role="radiogroup"
+        aria-label="Tamanho do texto"
+        className="card grid grid-cols-3"
+      >
+        {(Object.keys(TEXT_SIZES) as TextSize[]).map((key) => {
+          const active = size === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => setSize(key)}
+              className={`px-4 py-3 text-sm font-bold transition ${
+                active
+                  ? "bg-brand text-white"
+                  : "bg-surface text-ink hover:bg-brand-soft"
+              }`}
+            >
+              <span className={active ? "text-white" : "text-ink-soft"}>
+                {TEXT_SIZES[key].label}
+              </span>
+            </button>
           );
         })}
       </div>

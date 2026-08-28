@@ -5,6 +5,8 @@ import { getSeller } from "../data/sellers";
 import { PRODUCTS, type Product } from "../data/products";
 import { formatBRL } from "../lib/format";
 import { saveOverride, type SellerOverride } from "../lib/sellerOverrides";
+import { useToasts } from "../context/toastsCore";
+import SellerGate from "../components/SellerGate";
 
 type SortKey = "name" | "price-desc" | "price-asc" | "stock-desc";
 
@@ -102,6 +104,47 @@ export default function SellerProducts() {
   const [sort, setSort] = useState<SortKey>("name");
   const [editId, setEditId] = useState<string | null>(null);
   const [, setTick] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [bulkKind, setBulkKind] = useState<"stock" | "price">("stock");
+  const [bulkDir, setBulkDir] = useState<"up" | "down">("up");
+  const [bulkPct, setBulkPct] = useState("");
+  const { toast } = useToasts();
+
+  function toggleSelected(id: string) {
+    setSelected((sel) =>
+      sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id],
+    );
+  }
+
+  function toggleAll() {
+    setSelected(
+      rows.every((r) => selected.includes(r.id)) ? [] : rows.map((r) => r.id),
+    );
+  }
+
+  function applyBulk() {
+    const val = Number(bulkPct.replace(",", "."));
+    if (!Number.isFinite(val) || val <= 0 || val > 100) return;
+    const factor = bulkDir === "up" ? 1 + val / 100 : 1 - val / 100;
+    for (const id of selected) {
+      const p = PRODUCTS.find((x) => x.id === id);
+      if (!p) continue;
+      if (bulkKind === "stock") {
+        saveOverride(id, { stock: Math.max(0, Math.round(p.stock * factor)) });
+      } else {
+        saveOverride(id, {
+          price: Math.max(0.01, Math.round(p.price * factor * 100) / 100),
+        });
+      }
+    }
+    const n = selected.length;
+    setSelected([]);
+    setBulkPct("");
+    setTick((t) => t + 1);
+    toast.success(
+      `${n} produto(s) ajustado(s): ${bulkKind === "stock" ? "estoque" : "preço"} ${bulkDir === "up" ? "aumentado" : "reduzido"} em ${val}%.`,
+    );
+  }
 
   const seller = user?.sellerId ? getSeller(user.sellerId) : undefined;
 
@@ -137,24 +180,11 @@ export default function SellerProducts() {
 
   if (!user?.sellerId || !seller) {
     return (
-      <div className="mx-auto max-w-2xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
-        <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-          <span className="text-4xl" aria-hidden>
-            🏪
-          </span>
-          <h1 className="text-lg font-black text-ink">Meus produtos</h1>
-          <p className="max-w-sm text-sm text-ink-soft">
-            Entre com uma conta de vendedor para ver e gerenciar os produtos da
-            sua loja.
-          </p>
-          <Link
-            to="/entrar"
-            className="btn-brand mt-1 rounded-[6px] px-4 py-2 text-sm font-bold"
-          >
-            Entrar como vendedor
-          </Link>
-        </div>
-      </div>
+      <SellerGate
+        icon="🏪"
+        title="Meus produtos"
+        description="Veja e gerencie os produtos da sua loja."
+      />
     );
   }
 
@@ -189,7 +219,31 @@ export default function SellerProducts() {
           >
             Perguntas
           </Link>
+          <Link
+            to="/vendedor/promos"
+            className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+          >
+            Promoções
+          </Link>
+          <Link
+            to="/vendedor/cupons"
+            className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+          >
+            Cupons
+          </Link>
+          <Link
+            to="/vendedor/avaliacoes"
+            className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+          >
+            Avaliações
+          </Link>
         </nav>
+        <Link
+          to="/vendedor/produtos/novo"
+          className="mt-3 inline-flex items-center gap-1 rounded-[6px] bg-brand px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-dark"
+        >
+          <span aria-hidden="true">＋</span> Cadastrar novo produto
+        </Link>
       </header>
 
       <div className="card rounded-lg p-4">
@@ -219,6 +273,68 @@ export default function SellerProducts() {
           </label>
         </div>
 
+        {selected.length > 0 && (
+          <div className="mt-3 rounded-md border border-brand/40 bg-brand-soft p-3">
+            <p className="text-xs font-bold text-ink">
+              {selected.length} produto(s) selecionado(s) — ajuste em lote
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label className="text-[11px] font-semibold text-ink-soft">
+                <span className="sr-only">Campo a ajustar</span>
+                <select
+                  value={bulkKind}
+                  onChange={(e) =>
+                    setBulkKind(e.target.value as "stock" | "price")
+                  }
+                  className="rounded-[6px] border border-line bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-brand"
+                >
+                  <option value="stock">Estoque</option>
+                  <option value="price">Preço</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-semibold text-ink-soft">
+                <span className="sr-only">Direção do ajuste</span>
+                <select
+                  value={bulkDir}
+                  onChange={(e) => setBulkDir(e.target.value as "up" | "down")}
+                  className="rounded-[6px] border border-line bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-brand"
+                >
+                  <option value="up">Aumentar (+)</option>
+                  <option value="down">Reduzir (−)</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-semibold text-ink-soft">
+                <span className="sr-only">Porcentagem</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={bulkPct}
+                  onChange={(e) => setBulkPct(e.target.value)}
+                  placeholder="Ex.: 10"
+                  className="w-20 rounded-[6px] border border-line bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-brand"
+                />
+                <span className="ml-1">%</span>
+              </label>
+              <button
+                type="button"
+                onClick={applyBulk}
+                className="rounded-[6px] bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-dark"
+              >
+                Aplicar a todos
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected([])}
+                className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink-soft transition hover:bg-page"
+              >
+                Limpar seleção
+              </button>
+            </div>
+          </div>
+        )}
+
         {rows.length === 0 ? (
           <p className="mt-6 grid place-items-center gap-2 rounded-md border border-dashed border-line bg-page p-8 text-center text-sm text-ink-soft">
             <span className="text-2xl" aria-hidden>
@@ -231,6 +347,17 @@ export default function SellerProducts() {
             <table className="w-full min-w-[560px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line text-[11px] font-semibold text-ink-soft">
+                  <th className="py-2 pr-3">
+                    <input
+                      type="checkbox"
+                      checked={
+                        rows.length > 0 && rows.every((r) => selected.includes(r.id))
+                      }
+                      onChange={toggleAll}
+                      aria-label="Selecionar todos os produtos"
+                      className="size-4 accent-(--brand)"
+                    />
+                  </th>
                   <th className="py-2 pr-3">Produto</th>
                   <th className="py-2 pr-3">Marca</th>
                   <th className="py-2 pr-3">Preço</th>
@@ -248,6 +375,15 @@ export default function SellerProducts() {
                       className="border-b border-line/70 last:border-0"
                     >
                       <td className="py-3 pr-3">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(p.id)}
+                          onChange={() => toggleSelected(p.id)}
+                          aria-label={`Selecionar ${p.name}`}
+                          className="size-4 accent-(--brand)"
+                        />
+                      </td>
+                      <td className="py-3 pr-3">
                         <Link
                           to={`/produto/${p.id}`}
                           className="flex items-center gap-3 text-ink"
@@ -258,6 +394,7 @@ export default function SellerProducts() {
                             width={40}
                             height={40}
                             loading="lazy"
+                            decoding="async"
                             className="size-10 shrink-0 rounded-md border border-line object-cover"
                           />
                           <span className="line-clamp-2 max-w-56 font-semibold">

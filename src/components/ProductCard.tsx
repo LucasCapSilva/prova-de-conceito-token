@@ -1,11 +1,14 @@
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import type { ElementType } from "react";
+import { useMotion } from "../lib/motion";
 import type { Product } from "../data/products";
 import { useFavorites } from "../context/favoritesCore";
 import { useCompare } from "../context/compareCore";
 import SmartImage from "./SmartImage";
 import Reveal from "./Reveal";
 import Price from "./Price";
+import DeliveryEstimate from "./DeliveryEstimate";
+import { preloadPath } from "../lib/preload";
 
 const soldLabel = (n: number) =>
   n >= 1000
@@ -21,15 +24,21 @@ export default function ProductCard({ product, index = 0 }: { product: Product; 
   const fav = isFavorite(product.id);
   const comparing = isComparing(product.id);
   const compareFull = compareCount >= 3 && !comparing;
+  const m = useMotion();
+  const Card: ElementType = m ? m.motion.div : "div";
 
   return (
     <Reveal delay={Math.min(index * 0.06, 0.4)}>
-      <motion.div
-        whileHover={{ y: -6 }}
-        transition={{ type: "spring", stiffness: 300, damping: 24 }}
+      <Card
+        {...(m
+          ? {
+              whileHover: { y: -6 },
+              transition: { type: "spring", stiffness: 300, damping: 24 },
+            }
+          : {})}
         className="group card relative h-full overflow-hidden rounded-lg transition-shadow duration-300 hover:shadow-[0_12px_30px_-12px_rgba(0,0,0,0.28)]"
       >
-        <Link to={`/produto/${product.id}`} className="block">
+        <Link to={`/produto/${product.id}`} className="block" onMouseEnter={() => preloadPath(`/produto/${product.id}`)}>
           <div className="relative aspect-square overflow-hidden rounded-t-lg bg-ink-soft/10">
             <SmartImage
               src={product.image}
@@ -69,6 +78,11 @@ export default function ProductCard({ product, index = 0 }: { product: Product; 
             </h3>
 
             <Price className="mt-2" price={product.price} oldPrice={product.oldPrice} />
+            <DeliveryEstimate
+              price={product.price}
+              freeShipping={product.freeShipping}
+              className="mt-1"
+            />
 
             <div className="mt-2 flex items-center justify-between text-[11px] text-ink-soft">
               <span className="inline-flex items-center gap-1">
@@ -106,7 +120,7 @@ export default function ProductCard({ product, index = 0 }: { product: Product; 
             </button>
           </div>
         </Link>
-      </motion.div>
+      </Card>
     </Reveal>
   );
 }

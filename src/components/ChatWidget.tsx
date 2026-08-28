@@ -85,6 +85,8 @@ export default function ChatWidget() {
                 <SmartImage
                   src={seller.logo}
                   alt=""
+                  width={200}
+                  height={200}
                   className="size-8 rounded object-cover"
                 />
                 <div className="min-w-0 flex-1">
@@ -215,9 +217,11 @@ export default function ChatWidget() {
                         className="flex w-full items-center gap-2 px-3 py-3 text-left transition hover:bg-brand-soft sm:py-2"
                       >
                         <SmartImage
-                          src={s.logo}
-                          alt=""
-                          className="size-10 shrink-0 rounded object-cover sm:size-9"
+                            src={s.logo}
+                            alt=""
+                            width={200}
+                            height={200}
+                            className="size-10 shrink-0 rounded object-cover sm:size-9"
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-semibold text-ink sm:text-xs">

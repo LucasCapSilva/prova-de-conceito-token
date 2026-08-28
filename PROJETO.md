@@ -111,7 +111,9 @@ src/
 | `/checkout` | checkout |
 | `/pedido/:id` | confirmação do pedido |
 | `/favoritos` | favoritos |
-| `/entrar` | login (mock) |
+| `/entrar` | login (e-mail e senha) |
+| `/cadastro` | criar conta |
+| `/recuperar` | recuperação de senha (código na tela) |
 | `/pedidos` | meus pedidos |
 | `/pedidos/:id` | acompanhamento do pedido |
 | `/enderecos` | endereços salvos |
@@ -472,6 +474,398 @@ Fazer antes da Fase 7 — há dois bugs que impedem o uso.
 - [x] **Instalável (PWA)**: `public/manifest.webmanifest` com ícones e cores,
   ligado no `index.html`, mais um service worker simples que cacheia o casco da
   aplicação. Sem dependências novas.
+
+## Backlog — Parte 3
+
+As Partes 1 e 2 (fases 0 a 13) estão concluídas: 115 tarefas, build e lint
+limpos. Esta parte ataca a dívida técnica que sobrou, cobertura de testes,
+desempenho, e o que falta para o marketplace parecer maduro.
+
+**Premissa desta parte: comprar não exige conta.** Catálogo, carrinho, checkout,
+favoritos e acompanhamento de pedido continuam funcionando para visitante, com
+estado em `localStorage`. Nenhuma tarefa das fases 13.1 a 20 pode passar a exigir
+login para um fluxo que hoje funciona sem ele.
+
+A **Fase 21** acrescenta cadastro e login com senha de verdade, mas como camada
+opcional sobre isso — quem não quiser conta segue comprando como visitante.
+
+### Fase 13.1 — Bugs e dívida técnica (prioridade)
+
+Levantado com `npm run build`, `npm run lint` e varredura do `src/`.
+
+- [x] **Centralizar o acesso ao `localStorage` em `src/lib/storage.ts`.** Hoje
+  são 45 chamadas diretas espalhadas por `lib/` e `context/`, cada uma com seu
+  próprio `try/catch`. Criar `read<T>(key, fallback)` e `write<T>(key, value)`
+  com o prefixo `electronica:` aplicado uma vez só, e migrar todos os módulos.
+- [x] **BUG: a aplicação quebra quando o `localStorage` está indisponível.** Em
+  aba anônima com cookies bloqueados o acesso lança e a tela fica em branco.
+  Detectar uma vez na carga, cair para um armazenamento em memória e mostrar um
+  aviso discreto de que os dados não serão mantidos.
+- [x] **BUG: cota de `localStorage` estourada não é tratada.** Com muitos pedidos
+  e avaliações com fotos o `setItem` lança `QuotaExceededError` e a gravação
+  falha em silêncio. Capturar, avisar via toast e oferecer limpar o histórico de
+  vistos recentemente.
+- [x] **Versionar e migrar as chaves persistidas.** Gravar `electronica:schema`
+  com um número de versão e escrever migrações para quando o formato de um dado
+  mudar. Hoje uma mudança de formato deixa o usuário com dado velho corrompido.
+- [x] **Limpar chaves órfãs.** Existem chaves `electronica:` de funcionalidades
+  que mudaram de formato ao longo do backlog. Criar uma rotina que roda uma vez
+  e remove o que não é mais lido por nenhum módulo.
+- [x] **BUG: índice usado como chave de lista em 6 lugares.** Varrer `key={i}`,
+  `key={idx}` e `key={index}` no `src/` e trocar por um identificador estável.
+  Onde não houver id, derivar um determinístico — reordenar ou remover um item
+  hoje remonta os componentes errados e perde o estado dos campos.
+- [x] **Eliminar os 2 `any` / `as unknown` remanescentes.** Localizar com
+  `grep -rn "\bany\b\|as unknown" src` e substituir por tipos reais exportados do
+  módulo onde o dado nasce, como manda a convenção do projeto.
+- [x] **BUG: `useSimulatedLoading` não cancela ao desmontar.** Trocar de rota
+  antes da latência simulada terminar dispara atualização de estado em componente
+  desmontado. Guardar o timer, limpar no `useEffect` e ignorar o resultado se o
+  componente já saiu.
+- [x] **BUG: datas de pedido voltam do `localStorage` como texto.**
+  `lib/orders.ts` grava `Date` via `JSON.stringify` e lê de volta como string,
+  então as comparações de status e a linha do tempo operam sobre texto onde
+  esperam `Date`. Normalizar na leitura e cobrir com teste.
+- [x] **BUG: o service worker serve a versão velha para sempre.** O cache do casco
+  não tem estratégia de atualização, então quem já visitou nunca recebe um deploy
+  novo. Versionar o nome do cache, limpar os antigos no `activate` e avisar com
+  um toast de "nova versão disponível".
+
+### Fase 14 — Testes e verificação
+
+Sem dependências novas: o Node 24 já traz `node --test` e `node:assert`.
+
+- [x] **Configurar o runner nativo.** Adicionar
+  `"test": "node --test --experimental-strip-types src/**/*.test.ts"` ao
+  `package.json`. Um teste trivial precisa passar antes de seguir.
+- [x] **Testar `lib/format.ts`**: `formatBRL` com zero, negativo e milhar;
+  `formatCompact` na virada de mil; `formatInstallments` com e sem juros;
+  `formatDate` com data inválida.
+- [x] **Testar `lib/totals.ts`**: cupom percentual, fixo e de frete grátis; valor
+  mínimo não atingido; desconto Pix; empilhamento de cupom de plataforma com
+  cupom de vendedor.
+- [x] **Testar `lib/shipping.ts`**: determinismo do cálculo por CEP; frete grátis
+  acima de R$ 999; frete grátis quando todos os itens são `freeShipping`; as três
+  modalidades (econômico, padrão, expresso).
+- [x] **Testar `lib/masks.ts`**: Luhn com cartões válidos e inválidos conhecidos;
+  validade vencida; CVV de 3 e 4 dígitos; máscaras de CPF, telefone e CEP com
+  entrada parcial e com colagem de texto sujo.
+- [x] **Testar `lib/variants.ts`**: preço e estoque da combinação escolhida;
+  combinação esgotada; produto sem variação.
+- [x] **Testar `lib/catalog.ts`**: cada filtro isolado, filtros combinados, cada
+  ordenação, e a fatia de paginação nos limites (primeira, última, página vazia).
+- [x] **Script `npm run check`** que roda `lint`, `build` e `test` em sequência e
+  para no primeiro erro. Passa a ser o comando citado na regra 3 do loop.
+
+### Fase 15 — Desempenho
+
+O pacote inicial está em 304 kB (96 kB gzip), mais 120 kB de `framer-motion`.
+
+- [x] **Trocar o `Reveal.tsx` por `IntersectionObserver` e transição CSS.** É o
+  uso mais espalhado de `framer-motion` e o que menos precisa dele. Sozinho, deve
+  tirar a biblioteca do caminho crítico da Home.
+- [x] **Isolar o `framer-motion` no que sobrar.** Depois do `Reveal`, mapear quem
+  ainda importa a biblioteca e mover esses componentes para import dinâmico, com
+  o estado sem animação como alternativa.
+- [x] **Orçamento de pacote.** Script que lê o `dist/` após o build e falha se o
+  `index` passar de um teto definido, começando em 250 kB. Entra no
+  `npm run check`.
+- [x] **Virtualizar a grade do catálogo.** Com 60 produtos ainda cabe, mas a
+  paginação de 12 existe só para não renderizar tudo. Renderizar apenas as linhas
+  visíveis com `IntersectionObserver`, à mão, sem biblioteca.
+- [x] **`width` e `height` em toda imagem.** O `SmartImage` não reserva espaço,
+  então a grade salta enquanto carrega. Fixar a proporção e medir a melhora no
+  deslocamento de layout.
+- [x] **`loading="lazy"` e `decoding="async"`** nas imagens fora da primeira
+  dobra, mantendo `eager` na imagem principal do `ProductDetail` e no primeiro
+  banner da Home.
+- [x] **Memoizar o pipeline de filtros em `lib/catalog.ts`.** Hoje cada mudança de
+  filtro refaz a varredura completa dos 60 produtos e reordena. Memoizar por
+  assinatura dos filtros.
+- [x] **Atrasar a busca do `Navbar`.** O dropdown de sugestões recalcula a cada
+  tecla. Aplicar 150 ms de espera e cancelar o cálculo anterior.
+- [x] **Pré-carregar a rota no `mouseenter`** dos links de produto e categoria,
+  disparando o `import()` da página antes do clique.
+
+### Fase 16 — Catálogo e descoberta
+
+- [x] **Busca tolerante a erro de digitação.** Implementar distância de
+  Levenshtein à mão em `lib/search.ts` e aceitar até 2 edições em termos com 5
+  letras ou mais, para "notbook" encontrar "notebook".
+- [x] **Normalizar acentuação e caixa na busca.** "cafeteira" e "Cafeteíra" devem
+  dar o mesmo resultado. Normalizar índice e consulta com `NFD`.
+- [x] **Dicionário de sinônimos** em `src/data/synonyms.ts`: "fone" para
+  "headphone" e "headset", "celular" para "smartphone", "tv" para "televisão".
+  Aplicar na busca.
+- [x] **Contagem por faceta no `FilterPanel.tsx`.** Cada marca, categoria e faixa
+  mostra quantos produtos restam com os filtros atuais, e a opção que zeraria o
+  resultado aparece desabilitada.
+- [x] **Chips de filtros ativos** acima da grade, cada um removível
+  individualmente, mais um "limpar tudo". Sincronizados com a URL.
+- [x] **Filtro "somente com desconto" e ordenação por maior desconto**, calculados
+  a partir de `oldPrice`.
+- [x] **Filtro por faixa de parcelas** — "até 6x sem juros", "10x ou mais" —
+  usando o campo `installments`.
+- [x] **Filtros salvos.** Guardar combinações nomeadas em
+  `electronica:savedFilters` e oferecê-las em um seletor no topo do catálogo.
+- [x] **Subcategorias reais no `MegaMenu.tsx`.** Hoje o menu lista rótulos que não
+  filtram nada. Ligar cada subcategoria a um recorte de verdade do catálogo.
+- [x] **Página de marca** em `/marca/:slug`: cabeçalho com a marca, contagem de
+  produtos e a grade filtrada, reaproveitando o `CatalogView`.
+
+### Fase 17 — Carrinho, checkout e conversão
+
+- [x] **Estimativa de entrega antes do checkout.** Com o CEP já informado, mostrar
+  "chega até <data>" no `ProductCard` e no `ProductDetail`, usando
+  `lib/shipping.ts`.
+- [x] **Melhor cupom aplicado automaticamente.** Ao abrir o carrinho, avaliar
+  todos os cupons coletados e sugerir o que gera o maior desconto, com botão de
+  aplicar e comparação com o atual.
+- [x] **Comprados juntos com frequência.** Bloco no `ProductDetail` e no carrinho
+  com dois ou três itens complementares determinísticos por categoria, e botão
+  que adiciona o conjunto.
+- [x] **Kits com desconto progressivo.** "Leve 2, ganhe 10%" por vendedor ou
+  categoria, calculado em `lib/totals.ts` e exibido no bloco do vendedor no
+  carrinho.
+- [x] **Rascunho de checkout persistido.** Gravar a etapa e os campos preenchidos
+  em `electronica:checkoutDraft`; ao voltar, retomar de onde parou com aviso, e
+  limpar ao concluir o pedido.
+- [x] **Aviso de carrinho parado.** Se houver itens com mais de um dia e o usuário
+  voltar à Home, mostrar uma faixa discreta com o resumo e link para o carrinho.
+- [x] **Resumo do pedido fixo no rodapé em telas pequenas.** No `Checkout.tsx` o
+  total fica fora da tela no celular; fixar uma barra com total e botão de
+  avançar.
+- [x] **Embrulho para presente.** Caixa de seleção no checkout com taxa fixa e
+  campo de mensagem, refletidos no total, na confirmação e na nota simulada.
+- [x] **Aviso de mudança de preço no carrinho.** Guardar o preço de quando o item
+  entrou e, se o `sellerOverrides` alterar, destacar a diferença antes de fechar
+  a compra.
+
+### Fase 18 — Lado do vendedor
+
+- [x] **Cadastrar produto novo** em `/vendedor/produtos/novo`: formulário com
+  nome, categoria, marca, preço, estoque, imagens por URL e destaques, persistido
+  junto dos `sellerOverrides` e visível no catálogo.
+- [x] **Edição de estoque em lote.** Na tabela de `/vendedor/produtos`, seleção
+  múltipla e ação de ajustar estoque ou preço em porcentagem de uma vez.
+- [x] **Promoções por período.** Desconto com data de início e fim por produto,
+  refletido como `oldPrice` no catálogo enquanto vigente.
+- [x] **Cupom próprio do vendedor.** Criar, editar e desativar cupons que aparecem
+  no bloco daquele vendedor no carrinho e na `/cupons`.
+- [x] **Métricas do painel**: ticket médio, taxa de conversão simulada, produtos
+  sem venda no período e o mais vendido, derivados dos pedidos gravados.
+- [x] **Exportar pedidos em CSV.** Gerar o arquivo com `Blob` e
+  `URL.createObjectURL` — sem dependência nova — a partir de `/vendedor/pedidos`.
+- [x] **Avaliações recebidas** em `/vendedor/avaliacoes`: lista as avaliações dos
+  produtos do vendedor, com filtro por nota e campo de resposta pública que
+  aparece sob a avaliação no `ProductReviews.tsx`.
+- [x] **Meta mensal de faturamento.** Definir uma meta persistida e mostrar barra
+  de progresso no painel, com projeção até o fim do mês.
+
+### Fase 19 — Conteúdo, avaliações e confiança
+
+- [x] **Ordenar avaliações** por mais recentes, maior nota, menor nota e mais
+  úteis, somando ao filtro por nota que já existe.
+- [x] **Filtrar avaliações com foto** e marcar "compra verificada" nas que vieram
+  de um pedido gravado em `electronica:myreviews`.
+- [x] **Ampliação das fotos de avaliação.** Abrir em tela cheia com navegação por
+  setas e `Esc`, reaproveitando o `Modal.tsx`.
+- [x] **Denunciar avaliação.** Botão discreto com motivo, persistido, que oculta a
+  avaliação localmente após o envio.
+- [x] **Resumo automático das avaliações.** Extrair os termos mais frequentes dos
+  comentários e exibir como etiquetas clicáveis que filtram a lista.
+- [x] **Histórico de preço** no `ProductDetail`: gráfico em SVG puro dos últimos 6
+  meses, gerado de forma determinística a partir do id, com o menor preço
+  destacado.
+- [x] **Garantia e prazo de troca** no bloco de compra: selos com política de 7
+  dias, garantia do fabricante e devolução grátis, vindos de `data/products.ts`.
+- [x] **Guias de compra** em `/guias`: cinco artigos mocados, como "como escolher
+  um notebook", com produtos relacionados ao final de cada um e link a partir da
+  categoria correspondente.
+
+### Fase 20 — Acessibilidade e experiência
+
+- [x] **Auditoria de contraste dos tokens.** Verificar cada par de texto e fundo
+  do `index.css` contra WCAG AA, 4.5:1 para texto normal. O `--ink-soft` sobre
+  `--surface` e o branco sobre `--brand` são os suspeitos. Corrigir os tokens que
+  reprovarem, nos dois temas.
+- [x] **Marcos semânticos e link de pular.** `header`, `nav`, `main` e `footer`
+  com papéis corretos, e um "pular para o conteúdo" visível ao focar, como
+  primeiro elemento tabulável.
+- [x] **Região de status para leitores de tela.** `aria-live="polite"` nos toasts
+  e nas mudanças de carrinho, favoritos e filtros, sem repetir o mesmo anúncio.
+- [x] **Foco ao trocar de rota.** Hoje o foco fica preso onde estava. Mover para o
+  `h1` da página nova e anunciar o título, sem roubar o foco de campos.
+- [x] **Modo de alto contraste** como terceira opção do alternador de tema, com
+  bordas mais fortes e sem sombras.
+- [x] **Tamanho de texto ajustável** em `/preferencias`: três níveis aplicados via
+  `font-size` na raiz, persistidos, sem quebrar as grades.
+- [x] **Estados vazios em todas as listas.** Favoritos, alertas, cupons, pedidos,
+  devoluções, lojas seguidas e busca sem resultado: ilustração em SVG, uma frase
+  e um botão que leva ao catálogo.
+- [x] **Tela de offline do PWA.** Quando não houver rede, servir uma página própria
+  com o que está em cache — carrinho e favoritos continuam acessíveis — em vez do
+  erro do navegador.
+
+### Fase 21 — Cadastro e login com senha
+
+Hoje o `/entrar` aceita qualquer nome e e-mail, sem senha: a interface `User` em
+`context/authCore.ts` não tem campo de credencial e `type="password"` não existe
+em lugar nenhum do `src/`. Esta fase troca isso por cadastro e autenticação de
+verdade.
+
+O que isso é e o que não é: sem backend, a base de contas mora no `localStorage`
+do próprio navegador. Isso protege a senha de ficar legível em texto puro e faz o
+fluxo se comportar como o de um site real — mas **não** é segurança de servidor.
+Quem abrir o DevTools apaga ou edita a base à vontade. Trate como simulação
+fiel, não como proteção. Nenhuma senha real do usuário deve ser digitada aqui.
+
+Regra que não pode quebrar: **comprar continua não exigindo conta.** Carrinho,
+checkout, favoritos e acompanhamento de pedido seguem funcionando para visitante.
+
+- [x] **Derivação de senha em `src/lib/crypto.ts`.** Usar a Web Crypto nativa
+  (`crypto.subtle`), sem dependência nova: PBKDF2 com SHA-256, salt aleatório de
+  16 bytes por conta, 100.000 iterações, saída de 32 bytes em hexadecimal.
+  Expor `hashPassword(senha, salt)` e `verifyPassword(senha, salt, hash)` com
+  comparação de tempo constante. Nunca gravar a senha em texto.
+- [x] **Base de contas em `src/lib/accounts.ts`.** Persistir em
+  `electronica:accounts` uma lista de `{ id, name, email, salt, hash, createdAt }`.
+  E-mail normalizado em minúsculas e único — cadastro com e-mail já existente
+  falha com mensagem clara. Nenhum campo de senha em claro no objeto.
+- [x] **Página de cadastro em `/cadastro`.** Nome, e-mail, senha e confirmação de
+senha, com validação por campo e erro abaixo de cada um. Ao concluir, cria a
+conta, inicia a sessão e leva de volta para onde o usuário estava.
+- [x] **Medidor de força da senha.** Mínimo de 8 caracteres; barra com níveis
+  fraca, média e forte considerando tamanho, mistura de caixas, dígitos e
+  símbolos; lista de regras que vão sendo marcadas conforme atendidas. Bloquear o
+  envio enquanto estiver fraca.
+- [x] **Refazer o `/entrar` para e-mail e senha.** Substituir os campos atuais de
+  nome e e-mail por e-mail e senha, validando contra `lib/accounts.ts`. Em caso de
+  falha, mensagem genérica — "e-mail ou senha inválidos" — sem revelar qual dos
+  dois errou nem se o e-mail existe.
+- [x] **Mostrar e ocultar a senha, e cooperar com gerenciadores.** Botão de olho
+  com `aria-pressed` e rótulo que muda; `autocomplete="email"`,
+  `autocomplete="current-password"` no login e `autocomplete="new-password"` no
+  cadastro; `name` e `id` nos campos para que gerenciadores de senha reconheçam
+  o formulário.
+- [x] **Bloqueio após tentativas erradas.** Cinco falhas no mesmo e-mail bloqueiam
+  novas tentativas por 15 minutos, persistido em `electronica:lockouts`, com
+  contagem regressiva visível e as tentativas restantes exibidas antes de travar.
+- [x] **Sessão com validade em `electronica:session`.** Guardar apenas o id da
+  conta e um carimbo de expiração de 7 dias, renovado a cada uso. Sessão vencida
+  cai para visitante e redireciona ao `/entrar` preservando o destino pretendido.
+- [x] **Alterar senha em `/perfil`.** Exige a senha atual, valida a nova pelo
+  mesmo medidor de força, impede repetir a anterior e regrava salt e hash.
+  Confirmar com toast e manter a sessão ativa.
+- [x] **Recuperação de senha mocada em `/recuperar`.** Como não existe envio de
+  e-mail, gerar um código de 6 dígitos exibido na própria tela, válido por 10
+  minutos e persistido; conferido o código, permite definir uma senha nova.
+  Deixar explícito na interface que o código aparece ali por ser uma simulação.
+- [x] **Migrar quem já estava "logado" pelo mock antigo.** Sessões gravadas no
+  formato anterior viram uma conta sem senha; ao abrir o site, pedir uma vez que
+  o usuário defina uma senha, sem perder pedidos, favoritos nem endereços já
+  associados àquele e-mail.
+- [x] **Preservar a compra como visitante.** Revisar checkout, carrinho,
+  favoritos e `/pedidos` para que nenhum passe a exigir conta. Ao final de um
+  pedido feito sem login, oferecer criar conta aproveitando os dados já
+  preenchidos, com o pedido sendo vinculado se o usuário aceitar.
+- [x] **Ligar o vendedor à conta.** O `sellerId` deixa de ser escolhido no
+  `/entrar` e passa a ser um atributo da conta, definido em `/perfil`. As rotas
+  `/vendedor/*` exigem conta com `sellerId` e mostram uma tela explicativa em vez
+  de erro para quem não tiver.
+- [x] **Testar `lib/crypto.ts` e `lib/accounts.ts`.** Com o runner da Fase 14:
+  hash determinístico para o mesmo par de senha e salt, salts diferentes gerando
+  hashes diferentes para a mesma senha, verificação correta aceitando e
+  rejeitando, unicidade de e-mail e expiração de sessão.
+
+### Fase 22 — Funcionalidades novas
+
+Tudo continua sem backend e sem dependência nova. As APIs de navegador usadas
+aqui (`SpeechRecognition`, `BarcodeDetector`, `Geolocation`) são nativas e
+precisam de degradação elegante: se não existirem, a funcionalidade some da
+interface em vez de quebrar.
+
+- [x] **Avisar quando voltar ao estoque.** O alerta de preço em `lib/alerts.ts`
+  só observa preço. Adicionar um segundo tipo para produto ou variação esgotada,
+  com botão no `ProductDetail` quando o estoque for zero, listado em `/alertas`
+  em uma aba própria e notificando pelo sino do `Navbar`.
+ - [x] **Listas personalizadas.** Hoje existe uma lista única de favoritos. Permitir
+  criar várias listas nomeadas ("presentes", "setup novo"), mover e copiar itens
+  entre elas, renomear e excluir, persistido em `electronica:lists`. A tela
+  `/favoritos` passa a mostrar as listas.
+- [x] **Compartilhar lista ou carrinho por link.** Codificar os ids e quantidades
+  em base64 na própria URL — sem backend — gerando algo como
+  `/lista?d=...`. Ao abrir, mostrar os itens e oferecer copiar para o próprio
+  carrinho ou para uma lista. Avisar quando um item não existir mais.
+- [x] **Busca por voz.** Botão de microfone no `Navbar` usando
+  `webkitSpeechRecognition` em pt-BR, com estado de escuta, transcrição no campo
+  e envio automático. Esconder o botão onde a API não existir.
+- [x] **Leitor de código de barras.** Botão de câmera na busca usando
+  `BarcodeDetector`, casando o código lido com um novo campo `ean` em
+  `data/products.ts`. Onde a API faltar, oferecer digitar o código à mão.
+- [x] **Retirada em ponto de coleta.** Base mocada em `src/data/pickup.ts` com 12
+  pontos e seus horários. No checkout, alternativa à entrega: escolher o ponto
+  mais próximo do CEP, com frete zerado e prazo próprio, refletido na confirmação
+  e no rastreamento.
+- [x] **Agendar a data de entrega.** Na etapa de entrega, calendário com os
+  próximos 15 dias úteis, faixas de horário (manhã, tarde, noite) e taxa extra
+  para entrega agendada, tudo somado ao total.
+- [x] **Pagamento dividido em dois cartões.** No checkout, opção de repartir o
+  total entre dois cartões salvos, com valor por cartão validado para fechar
+  exatamente o total e parcelas calculadas separadamente.
+- [x] **Cashback em reais.** Distinto das moedas: percentual por categoria
+  creditado ao concluir o pedido, com extrato em `/cashback`, saldo aplicável
+  como desconto no checkout e prazo de liberação de 30 dias após a entrega.
+- [x] **Níveis de fidelidade.** Bronze, prata e ouro calculados pelo total gasto
+  nos últimos 12 meses, com benefícios por nível (cashback maior, frete grátis a
+  partir de valor menor), selo no `/perfil` e barra de progresso para o próximo
+  nível.
+- [x] **Novidades das lojas seguidas** em `/novidades`: feed cronológico com
+  lançamentos, promoções e respostas das lojas que o usuário segue, gerado de
+  forma determinística, com contador de não lidas no `Navbar`.
+- [x] **Avaliar o vendedor.** Separado da avaliação do produto: nota de
+  atendimento, embalagem e prazo, disponível em `/pedidos/:id` após a entrega,
+  compondo a reputação exibida no `SellerBlock` e na `/loja/:id`.
+- [x] **Denunciar anúncio.** Botão discreto no `ProductDetail` com motivos
+  (preço enganoso, produto proibido, imagem indevida), protocolo persistido e
+  confirmação. O anúncio denunciado fica marcado localmente para o usuário.
+- [x] **Privacidade e dados em `/privacidade`.** Listar todas as chaves
+  `electronica:` em uso e o que cada uma guarda; botão para exportar tudo em um
+  JSON baixável via `Blob`; e botão para apagar categorias de dados ou tudo, com
+  confirmação em duas etapas.
+- [x] **Tour guiado na primeira visita.** Sobreposição em 5 passos apontando
+  busca, categorias, carrinho, favoritos e conta, com "pular" sempre visível,
+  navegação por teclado e marcação em `electronica:tourSeen` para não repetir.
+
+### Fase 23 — Revisão final
+
+Última tarefa do backlog. Só entra quando todas as anteriores estiverem `[x]`.
+
+- [x] **Varredura geral de layout, espaçamento, lógica e responsividade em tudo
+  que foi construído.** Percorrer **todas** as rotas registradas no `App.tsx` uma
+  a uma — as 30 atuais mais as criadas pelas fases 16 a 22 —, com
+  `npm run build && npm run preview`, nas larguras 360, 414, 768, 1024, 1440 e
+  1920 px, e corrigir o que aparecer. Verificar em cada tela:
+  - **Espaçamento e margem** — a escala de 24 / 40 / 64 px definida na Fase 6.1
+    está aplicada de forma consistente entre seções e blocos; nenhum respiro
+    solto fora dela; padding interno dos cards igual em toda a aplicação.
+  - **Layout** — nada cortado, sobreposto ou escondido atrás do cabeçalho fixo;
+    nenhuma rolagem horizontal indesejada; grades ocupando a largura do contêiner
+    sem parar na metade; imagens com proporção reservada e sem salto ao carregar.
+  - **Responsividade** — a grade densa cai de 6 para 2 colunas como manda a
+    identidade visual; tabelas do painel do vendedor rolam ou viram cartões no
+    celular; modais, drawers e o mega menu cabem na tela e são fecháveis; áreas
+    de toque de no mínimo 44 px.
+  - **Lógica** — totais, descontos, cupons empilhados, cashback, moedas e frete
+    conferem em casos de borda (carrinho vazio, um item, estoque zerado, cupom
+    expirado, sessão vencida); estados de carregamento, vazio e erro existem em
+    toda lista; nenhum caminho leva a tela branca.
+  - **Consistência** — preço, selos, botões e títulos com a mesma aparência em
+    todas as telas; textos em português; foco visível em tudo que é focável.
+
+  Abrir uma linha `- [ ]` nova nesta fase para cada defeito encontrado, corrigir
+  um por vez seguindo as regras do loop, e só encerrar quando a varredura
+  completa passar sem achados novos e `npm run check` estiver verde.
 
 ## Regras do loop
 

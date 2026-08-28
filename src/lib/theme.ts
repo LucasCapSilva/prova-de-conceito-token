@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
+import { readRaw, writeRaw } from "./storage";
 
-export type Theme = "light" | "dark";
+export type Theme = "light" | "dark" | "contrast";
 
-const KEY = "electronica:theme";
+const KEY = "theme";
 const MEDIA = "(prefers-color-scheme: dark)";
+const NEXT: Record<Theme, Theme> = {
+  light: "dark",
+  dark: "contrast",
+  contrast: "light",
+};
 
 function stored(): Theme | null {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === "light" || v === "dark" ? v : null;
-  } catch {
-    return null;
-  }
+  const v = readRaw(KEY);
+  return v === "light" || v === "dark" || v === "contrast" ? v : null;
 }
 
 function prefers(): Theme {
@@ -48,12 +50,8 @@ export function useTheme(): [Theme, () => void] {
 
   const toggle = () =>
     setThemeState((t) => {
-      const next: Theme = t === "light" ? "dark" : "light";
-      try {
-        localStorage.setItem(KEY, next);
-      } catch {
-        /* sem storage */
-      }
+      const next = NEXT[t];
+      writeRaw(KEY, next);
       return next;
     });
 

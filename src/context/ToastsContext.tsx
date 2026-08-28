@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   ToastsContext,
+  type ToastAction,
   type ToastItem,
   type ToastKind,
   type ToastsContextValue,
@@ -75,25 +76,39 @@ export function ToastsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const push = useCallback(
-    (kind: ToastKind, message: string) => {
+    (kind: ToastKind, message: string, action?: ToastAction) => {
       const id = ++nextId.current;
-      setToasts((list) => [...list, { id, kind, message }].slice(-MAX_STACK));
-      window.setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
+      setToasts((list) =>
+        [...list, { id, kind, message, action }].slice(-MAX_STACK)
+      );
+      window.setTimeout(
+        () => dismiss(id),
+        action ? AUTO_DISMISS_MS * 2 : AUTO_DISMISS_MS
+      );
     },
     [dismiss]
+  );
+
+  const success = useCallback(
+    (m: string, a?: ToastAction) => push("success", m, a),
+    [push]
+  );
+  const error = useCallback(
+    (m: string, a?: ToastAction) => push("error", m, a),
+    [push]
+  );
+  const info = useCallback(
+    (m: string, a?: ToastAction) => push("info", m, a),
+    [push]
   );
 
   const value = useMemo<ToastsContextValue>(
     () => ({
       toasts,
-      toast: {
-        success: (m) => push("success", m),
-        error: (m) => push("error", m),
-        info: (m) => push("info", m),
-      },
+      toast: { success, error, info },
       dismiss,
     }),
-    [toasts, push, dismiss]
+    [toasts, success, error, info, dismiss]
   );
 
   return (
@@ -110,7 +125,21 @@ export function ToastsProvider({ children }: { children: ReactNode }) {
             className="pointer-events-auto flex items-start gap-2 rounded-[4px] border border-line bg-surface px-3 py-2.5 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.45)]"
           >
             {ICONS[t.kind]}
-            <p className="flex-1 text-sm text-ink">{t.message}</p>
+            <div className="flex flex-1 flex-col gap-1.5">
+              <p className="text-sm text-ink">{t.message}</p>
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    t.action?.onClick();
+                    dismiss(t.id);
+                  }}
+                  className="self-start text-sm font-medium text-[var(--brand)] hover:text-[var(--brand-dark)]"
+                >
+                  {t.action.label}
+                </button>
+              )}
+            </div>
             <button
               type="button"
               aria-label="Fechar aviso"

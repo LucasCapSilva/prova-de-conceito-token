@@ -6,23 +6,18 @@ import {
   type CartItem,
   type CartContextValue,
 } from "./cartCore";
-import { maxQtyFor } from "../lib/variants";
+import { maxQtyFor, unitPriceFor } from "../lib/variants";
+import { read, write } from "../lib/storage";
 
-const STORAGE_KEY = "electronica:cart";
-const SAVED_KEY = "electronica:savelater";
+const STORAGE_KEY = "cart";
+const SAVED_KEY = "savelater";
 
 function loadSaved(): CartItem[] {
-  try {
-    const raw = localStorage.getItem(SAVED_KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw);
-    if (!Array.isArray(list)) return [];
-    return (list as CartItem[])
-      .filter((i) => i && typeof i === "object" && i.product && i.product.id)
-      .map(normalize);
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(SAVED_KEY, null);
+  if (!Array.isArray(raw)) return [];
+  return (raw as CartItem[])
+    .filter((i) => i && typeof i === "object" && i.product && i.product.id)
+    .map(normalize);
 }
 
 function normalize(item: CartItem): CartItem {
@@ -33,6 +28,14 @@ function normalize(item: CartItem): CartItem {
     product,
     qty: item.qty,
     variantKey,
+    addedAt:
+      typeof item.addedAt === "number" && Number.isFinite(item.addedAt)
+        ? item.addedAt
+        : Date.now(),
+    addedPrice:
+      typeof item.addedPrice === "number" && Number.isFinite(item.addedPrice)
+        ? item.addedPrice
+        : unitPriceFor(product, variantKey),
   };
 }
 
@@ -42,28 +45,25 @@ interface PersistedCart {
 }
 
 function loadFromStorage(): PersistedCart {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { items: [], sellerCoupons: {} };
-    const parsed = JSON.parse(raw);
-    const list = Array.isArray(parsed)
-      ? parsed
-      : parsed && Array.isArray(parsed.items)
-        ? parsed.items
-        : null;
-    if (!list) return { items: [], sellerCoupons: {} };
-    const items = (list as CartItem[])
-      .filter((i) => i && typeof i === "object" && i.product && i.product.id)
-      .map(normalize);
-    const sellerCoupons =
-      parsed && !Array.isArray(parsed) && parsed.sellerCoupons &&
-      typeof parsed.sellerCoupons === "object"
-        ? (parsed.sellerCoupons as Record<string, string>)
-        : {};
-    return { items, sellerCoupons };
-  } catch {
+  const parsed = read<unknown>(STORAGE_KEY, null);
+  if (parsed === null || parsed === undefined) {
     return { items: [], sellerCoupons: {} };
   }
+  const list = Array.isArray(parsed)
+    ? parsed
+    : parsed && Array.isArray((parsed as PersistedCart).items)
+      ? (parsed as PersistedCart).items
+      : null;
+  if (!list) return { items: [], sellerCoupons: {} };
+  const items = (list as CartItem[])
+    .filter((i) => i && typeof i === "object" && i.product && i.product.id)
+    .map(normalize);
+  const sellerCoupons =
+    parsed && !Array.isArray(parsed) && (parsed as PersistedCart).sellerCoupons &&
+    typeof (parsed as PersistedCart).sellerCoupons === "object"
+      ? ((parsed as PersistedCart).sellerCoupons as Record<string, string>)
+      : {};
+  return { items, sellerCoupons };
 }
 
 function lineKey(p: Product, variantKey: string | null): string {
@@ -83,22 +83,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ items, sellerCoupons })
-      );
-    } catch {
-      /* storage indisponível — ignora */
-    }
+    write(STORAGE_KEY, { items, sellerCoupons });
   }, [items, sellerCoupons]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
-    } catch {
-      /* storage indisponível — ignora */
-    }
+    write(SAVED_KEY, saved);
   }, [saved]);
 
   const value = useMemo<CartContextValue>(() => {
@@ -134,6 +123,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
               product: p,
               qty: Math.min(qty, max),
               variantKey,
+              addedAt: Date.now(),
+              addedPrice: unitPriceFor(p, variantKey),
             },
           ];
         });
@@ -205,6 +196,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
               product: it.product,
               qty: Math.min(it.qty, max),
               variantKey: it.variantKey,
+              addedAt: Date.now(),
+              addedPrice: unitPriceFor(it.product, it.variantKey),
             },
           ];
         });

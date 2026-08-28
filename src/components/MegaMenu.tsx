@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CATEGORIES, PRODUCTS } from "../data/products";
+import { CATEGORIES, PRODUCTS, brandSlug } from "../data/products";
+import { preloadPath } from "../lib/preload";
 
 const COLS = CATEGORIES.filter((c) => c.key !== "todos").map((c) => {
   const brands = Array.from(
@@ -76,6 +77,7 @@ export default function MegaMenu() {
     <>
       <button
         ref={btnRef}
+        data-tour="categorias"
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
@@ -114,6 +116,7 @@ export default function MegaMenu() {
                 <div key={col.key}>
                   <Link
                     to={`/categoria/${col.key}`}
+                    onMouseEnter={() => preloadPath(`/categoria/${col.key}`)}
                     onClick={() => setOpen(false)}
                     className="mb-1.5 block text-sm font-bold text-ink hover:text-brand"
                   >
@@ -123,7 +126,8 @@ export default function MegaMenu() {
                     {col.brands.map((b) => (
                       <li key={b}>
                         <Link
-                          to={`/categoria/${col.key}?brand=${encodeURIComponent(b)}`}
+                          to={`/marca/${brandSlug(b)}`}
+                          onMouseEnter={() => preloadPath(`/marca/${brandSlug(b)}`)}
                           onClick={() => setOpen(false)}
                           className="text-xs text-ink-soft hover:text-brand hover:underline"
                         >

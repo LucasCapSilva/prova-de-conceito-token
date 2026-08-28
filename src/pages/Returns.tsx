@@ -8,6 +8,7 @@ import {
 } from "../lib/returns";
 import { formatDate } from "../lib/format";
 import SmartImage from "../components/SmartImage";
+import EmptyState from "../components/EmptyState";
 
 function timeOf(iso: string) {
   return new Date(iso).toLocaleTimeString("pt-BR", {
@@ -50,22 +51,12 @@ export default function Returns() {
       </div>
 
       {returns.length === 0 ? (
-        <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-          <span className="text-4xl">↩️</span>
-          <p className="text-sm font-semibold text-ink">
-            Nenhuma devolução ainda
-          </p>
-          <p className="max-w-xs text-xs text-ink-soft">
-            Quando você solicitar a devolução de um item de um pedido entregue,
-            ela aparece aqui com o protocolo e a linha do tempo.
-          </p>
-          <Link
-            to="/pedidos"
-            className="btn-brand mt-1 rounded-[6px] px-4 py-2 text-sm font-bold"
-          >
-            Ver meus pedidos
-          </Link>
-        </div>
+        <EmptyState
+          icon="return"
+          title="Nenhuma devolução ainda"
+          message="Quando você solicitar a devolução de um item de um pedido entregue, ela aparece aqui com o protocolo e a linha do tempo."
+          cta={{ to: "/pedidos", label: "Ver meus pedidos" }}
+        />
       ) : (
         <ul className="space-y-3">
           {returns.map((r) => (

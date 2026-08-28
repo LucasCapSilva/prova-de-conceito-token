@@ -1,3 +1,5 @@
+import { read, write } from "./storage";
+
 export type NotifKind = "promocoes" | "pedidos" | "mensagens";
 
 export interface NotifPrefs {
@@ -8,21 +10,14 @@ export interface NotifPrefs {
 
 export const NOTIF_PREFS_EVENT = "electronica:notif-prefs";
 
-const KEY = "electronica:notif:prefs";
+const KEY = "notif:prefs";
 
 export function getNotifPrefs(): NotifPrefs {
-  let data: Partial<Record<NotifKind, boolean>> = {};
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        data = parsed as Partial<Record<NotifKind, boolean>>;
-      }
-    }
-  } catch {
-    data = {};
-  }
+  const parsed: unknown = read<unknown>(KEY, null);
+  const data: Partial<Record<NotifKind, boolean>> =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Partial<Record<NotifKind, boolean>>)
+      : {};
   return {
     promocoes: data.promocoes !== false,
     pedidos: data.pedidos !== false,
@@ -32,11 +27,7 @@ export function getNotifPrefs(): NotifPrefs {
 
 export function setNotifPref(kind: NotifKind, on: boolean): NotifPrefs {
   const next: NotifPrefs = { ...getNotifPrefs(), [kind]: on };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* sem storage */
-  }
+  write(KEY, next);
   try {
     window.dispatchEvent(new CustomEvent(NOTIF_PREFS_EVENT));
   } catch {

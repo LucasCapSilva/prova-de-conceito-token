@@ -1,6 +1,7 @@
 import { earnCoins } from "./coins";
+import { read, write } from "./storage";
 
-const KEY = "electronica:checkin";
+const KEY = "checkin";
 
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -13,22 +14,13 @@ export function todayKey(): string {
 }
 
 function persist(days: string[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(days));
-  } catch {
-    /* ignora */
-  }
+  write(KEY, days);
 }
 
 export function getCheckins(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr.filter((x): x is string => typeof x === "string");
 }
 
 export function hasCheckedToday(): boolean {

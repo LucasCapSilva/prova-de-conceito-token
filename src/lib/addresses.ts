@@ -1,34 +1,21 @@
 import type { Address } from "./orders";
+import { read, write } from "./storage";
 
-const KEY = "electronica:addresses";
+const KEY = "addresses";
 
 export function getAddresses(): Address[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Address[]) : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  return Array.isArray(raw) ? (raw as Address[]) : [];
 }
 
 export function addAddress(addr: Address): void {
   const list = getAddresses();
   list.unshift(addr);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-  } catch {
-    /* storage indisponível — ignora */
-  }
+  write(KEY, list);
 }
 
 export function removeAddress(index: number): Address[] {
   const list = getAddresses().filter((_, i) => i !== index);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-  } catch {
-    /* storage indisponível — ignora */
-  }
+  write(KEY, list);
   return list;
 }

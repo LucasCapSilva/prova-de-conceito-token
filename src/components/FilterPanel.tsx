@@ -1,4 +1,5 @@
 import type { CatalogState } from "../lib/catalog";
+import { facetCounts } from "../lib/catalog";
 import { BRANDS } from "../data/products";
 
 const inputCls =
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function FilterPanel({ value, onPatch, onClear, activeCount }: Props) {
+  const counts = facetCounts(value);
   return (
     <aside className="card w-full p-4 lg:sticky lg:top-28 lg:h-fit">
       <div className="mb-4 flex items-center justify-between">
@@ -54,6 +56,9 @@ export default function FilterPanel({ value, onPatch, onClear, activeCount }: Pr
               className={inputCls}
             />
           </div>
+          <p className="mt-1 text-[11px] text-ink-soft">
+            {counts.total} produto{counts.total === 1 ? "" : "s"} nesta faixa
+          </p>
         </div>
 
         <div>
@@ -104,11 +109,14 @@ export default function FilterPanel({ value, onPatch, onClear, activeCount }: Pr
             className={inputCls}
           >
             <option value="">Todas</option>
-            {BRANDS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
+            {BRANDS.map((b) => {
+              const n = counts.brands[b] ?? 0;
+              return (
+                <option key={b} value={b} disabled={value.brand !== b && n === 0}>
+                  {b} ({n})
+                </option>
+              );
+            })}
           </select>
         </div>
 
@@ -130,6 +138,36 @@ export default function FilterPanel({ value, onPatch, onClear, activeCount }: Pr
             className="size-4 accent-brand"
           />
           <span className="font-medium text-ink">Vendedor oficial</span>
+        </label>
+
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-soft">
+            Parcelas
+          </p>
+          <select
+            value={value.installments}
+            onChange={(e) =>
+              onPatch({
+                installments: e.target.value as CatalogState["installments"],
+              })
+            }
+            aria-label="Parcelas"
+            className={inputCls}
+          >
+            <option value="">Qualquer</option>
+            <option value="6">Até 6x sem juros</option>
+            <option value="10">10x ou mais</option>
+          </select>
+        </div>
+
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={value.discountOnly}
+            onChange={(e) => onPatch({ discountOnly: e.target.checked })}
+            className="size-4 accent-brand"
+          />
+          <span className="font-medium text-ink">Somente com desconto</span>
         </label>
       </div>
     </aside>

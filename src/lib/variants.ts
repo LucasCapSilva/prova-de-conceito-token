@@ -99,3 +99,16 @@ export function describeSelection(
   }
   return parts.join(" · ");
 }
+
+export interface PriceChange {
+  added: number;
+  current: number;
+  delta: number;
+}
+
+export function priceChange(added: number, current: number): PriceChange | null {
+  if (!Number.isFinite(added) || added <= 0) return null;
+  const delta = Math.round((current - added) * 100) / 100;
+  if (delta === 0) return null;
+  return { added, current, delta };
+}

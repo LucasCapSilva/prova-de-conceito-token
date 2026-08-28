@@ -1,16 +1,22 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { Fragment, useMemo, useState, type ElementType } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useMotion } from "../lib/motion";
 import { formatBRL } from "../lib/format";
-import { useCart, type CartItem } from "../context/cartCore";
+import { useCart, priceChangeFor, type CartItem } from "../context/cartCore";
 import { useToasts } from "../context/toastsCore";
 import ConfirmModal from "../components/ConfirmModal";
 import { getSeller } from "../data/sellers";
-import { getCoupon, getCouponForSeller } from "../data/coupons";
+import { COUPONS, getCoupon } from "../data/coupons";
+import { lookupSellerCoupon } from "../lib/sellerCoupons";
+import type { Coupon } from "../data/coupons";
 import type { CouponResult } from "../lib/totals";
-import { quoteShipping, FREE_SHIPPING_THRESHOLD } from "../lib/shipping";
-import { computeCoupon } from "../lib/totals";
+import { quoteShipping } from "../lib/shipping";
+import { freeShipThreshold } from "../lib/loyalty";
+import { computeCoupon, suggestBestCoupon, kitDiscount, kitNext, KIT_TIER_1, KIT_TIER_2 } from "../lib/totals";
+import { getCollected } from "../lib/couponBox";
 import { describeSelection, maxQtyFor, unitPriceFor } from "../lib/variants";
+import { bundleSet } from "../lib/bundles";
+import { buildShareUrl, copyText } from "../lib/share";
 import SmartImage from "../components/SmartImage";
 import Reveal from "../components/Reveal";
 
@@ -53,6 +59,7 @@ export default function Cart() {
     setQty,
     removeItem,
     clear,
+    addItem,
     saveForLater,
     restoreFromSaved,
     removeSaved,
@@ -63,9 +70,28 @@ export default function Cart() {
   } = useCart();
   const navigate = useNavigate();
   const { toast } = useToasts();
+  const m = useMotion();
+  const EmptyBox: ElementType = m ? m.motion.div : "div";
+  const Title: ElementType = m ? m.motion.h1 : "h1";
+  const Section: ElementType = m ? m.motion.section : "section";
+  const Bar: ElementType = m ? m.motion.div : "div";
+  const CheckoutBtn: ElementType = m ? m.motion.button : "button";
+  const Presence: ElementType = m ? m.AnimatePresence : Fragment;
 
+  const [shareBusy, setShareBusy] = useState(false);
+  async function shareCart() {
+    if (selectedItems.length === 0 || shareBusy) return;
+    setShareBusy(true);
+    const entries = selectedItems.map((i) => ({ id: i.product.id, qty: i.qty }));
+    const url = buildShareUrl(entries);
+    const ok = await copyText(url);
+    setShareBusy(false);
+    if (ok) toast.success("Link do carrinho copiado.");
+    else toast.error("Não foi possível copiar o link.");
+  }
   const [couponInput, setCouponInput] = useState("");
   const [couponError, setCouponError] = useState<string | null>(null);
+  const [collected] = useState<string[]>(() => getCollected());
   const [sellerInputs, setSellerInputs] = useState<Record<string, string>>({});
   const [sellerErrors, setSellerErrors] = useState<Record<string, string>>({});
   const [cep, setCep] = useState("");
@@ -89,6 +115,36 @@ export default function Cart() {
     () => selectedItems.reduce((acc, i) => acc + i.qty, 0),
     [selectedItems]
   );
+  const priceChanges = useMemo(
+    () =>
+      selectedItems
+        .map((i) => ({ lineId: i.lineId, change: priceChangeFor(i) }))
+        .filter((x): x is { lineId: string; change: NonNullable<ReturnType<typeof priceChangeFor>> } => x.change !== null),
+    [selectedItems]
+  );
+
+  const bundle = useMemo(() => {
+    const anchorItem = selectedItems[0] ?? items[0];
+    if (!anchorItem) return null;
+    const set = bundleSet(anchorItem.product);
+    if (!set) return null;
+    const companions = set.companions.filter(
+      (p) => !items.some((i) => i.product.id === p.id)
+    );
+    if (companions.length === 0) return null;
+    const total =
+      Math.round(
+        (anchorItem.product.price +
+          companions.reduce((acc, p) => acc + p.price, 0)) *
+          100
+      ) / 100;
+    return {
+      anchor: anchorItem.product,
+      companions,
+      total,
+      count: 1 + companions.length,
+    };
+  }, [items, selectedItems]);
 
   const groups = useMemo(() => {
     const order: string[] = [];
@@ -137,6 +193,23 @@ export default function Cart() {
     setCoupon(c.code);
   }
 
+  const collectedCoupons = useMemo(
+    () =>
+      collected
+        .map((id) => COUPONS.find((c) => c.id === id && !c.sellerId))
+        .filter((c): c is Coupon => Boolean(c)),
+    [collected]
+  );
+  const suggestion = useMemo(
+    () => suggestBestCoupon(collectedCoupons, selectedSubtotal, today),
+    [collectedCoupons, selectedSubtotal, today]
+  );
+  const showSuggestion =
+    !!suggestion &&
+    suggestion.coupon.code !== (couponCode ?? "").trim() &&
+    (suggestion.result.discount > couponDiscount ||
+      (suggestion.result.freeShip && !couponFreeShip));
+
   // cupons dos vendedores
   const sellerDiscounts = useMemo(() => {
     const out: {
@@ -154,13 +227,30 @@ export default function Cart() {
       out.push({
         sellerId: sid,
         code,
-        result: computeCoupon(getCouponForSeller(code, sid), sub, today),
+        result: computeCoupon(lookupSellerCoupon(code, sid), sub, today),
       });
     }
     return out;
   }, [sellerCoupons, selectedItems, today]);
   const sellerDiscountTotal = sellerDiscounts.reduce(
     (acc, d) => acc + d.result.discount,
+    0
+  );
+
+  // kits com desconto progressivo (por vendedor)
+  const sellerKits = useMemo(() => {
+    const out = new Map<string, { qty: number; sub: number }>();
+    for (const i of selectedItems) {
+      const sid = i.product.sellerId;
+      const e = out.get(sid) ?? { qty: 0, sub: 0 };
+      e.qty += i.qty;
+      e.sub += i.qty * unitPriceFor(i.product, i.variantKey);
+      out.set(sid, e);
+    }
+    return out;
+  }, [selectedItems]);
+  const kitDiscountTotal = Array.from(sellerKits.values()).reduce(
+    (acc, { qty, sub }) => acc + kitDiscount(qty, sub),
     0
   );
 
@@ -172,7 +262,7 @@ export default function Cart() {
       setErr("Digite um código de cupom.");
       return;
     }
-    const c = getCouponForSeller(code, sellerId);
+    const c = lookupSellerCoupon(code, sellerId);
     if (!c) {
       setErr("Cupom inválido para este vendedor.");
       return;
@@ -204,15 +294,20 @@ export default function Cart() {
     : null;
   const shippingValue = effectiveQuote ? effectiveQuote.value : 0;
   const total =
-    selectedSubtotal - couponDiscount - sellerDiscountTotal + shippingValue;
+    selectedSubtotal -
+    couponDiscount -
+    sellerDiscountTotal -
+    kitDiscountTotal +
+    shippingValue;
 
   // barra de frete grátis
   const allSelectedFree =
     selectedItems.length > 0 && selectedItems.every((i) => i.product.freeShipping);
+  const shipAt = freeShipThreshold();
   const shippingFreeNow =
-    selectedSubtotal >= FREE_SHIPPING_THRESHOLD || allSelectedFree || couponFreeShip;
-  const toFree = Math.max(0, FREE_SHIPPING_THRESHOLD - selectedSubtotal);
-  const freeProgress = Math.min(1, selectedSubtotal / FREE_SHIPPING_THRESHOLD);
+    selectedSubtotal >= shipAt || allSelectedFree || couponFreeShip;
+  const toFree = Math.max(0, shipAt - selectedSubtotal);
+  const freeProgress = Math.min(1, selectedSubtotal / shipAt);
 
   // seleção
   const allSelected =
@@ -231,13 +326,17 @@ export default function Cart() {
   if (items.length === 0) {
     return (
       <div className="mx-auto max-w-xl px-4 pt-40 text-center sm:px-6">
-        <motion.div
-          animate={{ y: [0, -14, 0] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        <EmptyBox
+          {...(m
+            ? {
+                animate: { y: [0, -14, 0] },
+                transition: { duration: 3, repeat: Infinity, ease: "easeInOut" },
+              }
+            : {})}
           className="mx-auto grid size-28 place-items-center rounded-full border border-line bg-surface text-5xl"
         >
           🛒
-        </motion.div>
+        </EmptyBox>
         <h1 className="mt-8 text-3xl font-bold text-ink sm:text-4xl">
           Seu carrinho está vazio
         </h1>
@@ -256,16 +355,32 @@ export default function Cart() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 pb-28 pt-32 sm:px-6 sm:pt-28 lg:pb-10">
-      <motion.h1
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+      <Title
+        {...(m
+          ? { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 } }
+          : {})}
         className="text-3xl font-bold text-ink sm:text-4xl"
       >
         Seu carrinho
         <span className="ml-3 text-lg font-medium text-ink-soft">
           ({count} {count === 1 ? "item" : "itens"})
         </span>
-      </motion.h1>
+      </Title>
+
+      {selectedItems.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={shareCart}
+            disabled={shareBusy}
+            className="rounded-[6px] border border-line bg-surface px-3 py-2 text-sm font-semibold text-ink transition-colors hover:border-brand hover:text-brand disabled:opacity-60"
+          >
+            {shareBusy
+              ? "Copiando…"
+              : "Compartilhar carrinho por link"}
+          </button>
+        </div>
+      )}
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
         <div className="space-y-4">
@@ -286,7 +401,7 @@ export default function Cart() {
             </span>
           </div>
 
-          <AnimatePresence initial={false}>
+          <Presence initial={false}>
             {groups.map(({ seller, items: sellerItems }) => {
               const sellerIds = sellerItems.map((i) => i.lineId);
               const sellerSelCount = sellerItems.filter((i) =>
@@ -303,10 +418,16 @@ export default function Cart() {
               const sellerD = sellerDiscounts.find(
                 (x) => x.sellerId === seller.id
               );
+              const sellerQty = sellerSelCount.reduce(
+                (acc, i) => acc + i.qty,
+                0
+              );
+              const sellerKit = kitDiscount(sellerQty, sellerSubtotal);
+              const kitNxt = kitNext(sellerQty);
               return (
-                <motion.section
+                <Section
                   key={seller.id}
-                  layout
+                  {...(m ? { layout: true } : {})}
                   className="overflow-hidden rounded-lg border border-line bg-surface"
                 >
                   <div className="flex items-center gap-3 border-b border-line bg-page/40 px-4 py-3">
@@ -395,16 +516,71 @@ export default function Cart() {
                     ) : null}
                   </div>
 
+                  <div className="border-b border-line bg-brand-soft/50 px-4 py-2.5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold">
+                      <span
+                        className={
+                          sellerQty >= KIT_TIER_1.tier
+                            ? "text-ship"
+                            : "text-ink-soft"
+                        }
+                      >
+                        Leve {KIT_TIER_1.tier}, ganhe {KIT_TIER_1.percent}%
+                      </span>
+                      <span className="text-ink-soft">·</span>
+                      <span
+                        className={
+                          sellerQty >= KIT_TIER_2.tier
+                            ? "text-ship"
+                            : "text-ink-soft"
+                        }
+                      >
+                        Leve {KIT_TIER_2.tier}, ganhe {KIT_TIER_2.percent}%
+                      </span>
+                      {sellerKit > 0 && (
+                        <span className="text-ship">
+                          −{formatBRL(sellerKit)}
+                        </span>
+                      )}
+                      {kitNxt && (
+                        <span className="text-ink-soft">
+                          {kitNxt.missing === 1
+                            ? "Falta 1 item"
+                            : `Faltam ${kitNxt.missing} itens`}{" "}
+                          para {kitNxt.percent}%
+                        </span>
+                      )}
+                    </div>
+                    {sellerQty > 0 && sellerQty < KIT_TIER_2.tier && (
+                      <div
+                        className="mt-1.5 h-1.5 rounded-full bg-brand/10"
+                        role="progressbar"
+                        aria-label={`Progresso do kit de ${seller.name}`}
+                        aria-valuemin={0}
+                        aria-valuemax={KIT_TIER_2.tier}
+                        aria-valuenow={sellerQty}
+                      >
+                        <div
+                          className="h-full rounded-full bg-brand transition-all"
+                          style={{
+                            width: `${(sellerQty / KIT_TIER_2.tier) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <ul className="divide-y divide-line">
                     {sellerItems.map((item) => {
                       const isSel = selected.includes(item.lineId);
                       const unit = unitPriceFor(item.product, item.variantKey);
                       const max = maxQtyFor(item.product, item.variantKey);
-                      const vdesc = describeSelection(
-                        item.product,
-                        item.variantKey
-                      );
-                      return (
+                        const vdesc = describeSelection(
+                          item.product,
+                          item.variantKey
+                        );
+                        const change = priceChangeFor(item);
+                        return (
                         <li
                           key={item.lineId}
                           className={`flex flex-col gap-3 p-4 sm:flex-row sm:items-center ${
@@ -435,9 +611,24 @@ export default function Cart() {
                                 <p className="text-sm text-ink-soft">
                                   {formatBRL(unit)} un.
                                 </p>
+                                {change && (
+                                  <p
+                                    className={`mt-1 rounded-md px-2 py-1 text-xs font-semibold ${
+                                      change.delta > 0
+                                        ? "bg-rose-50 text-rose-600"
+                                        : "bg-ship/10 text-ship"
+                                    }`}
+                                  >
+                                    Preço mudou: era {formatBRL(change.added)}, agora{" "}
+                                    {formatBRL(change.current)}
+                                  </p>
+                                )}
                                 <div className="mt-1 flex items-center gap-3">
                                   <button
-                                    onClick={() => removeItem(item.lineId)}
+                                    onClick={() => {
+                                      removeItem(item.lineId);
+                                      toast.info("Item removido do carrinho.");
+                                    }}
                                     className="text-xs font-medium text-rose-500 transition-colors hover:text-rose-600"
                                   >
                                     Remover
@@ -492,10 +683,10 @@ export default function Cart() {
                       );
                     })}
                   </ul>
-                </motion.section>
+                </Section>
               );
             })}
-          </AnimatePresence>
+          </Presence>
 
           <button
             onClick={() => setConfirmClear(true)}
@@ -503,6 +694,73 @@ export default function Cart() {
           >
             Esvaziar carrinho
           </button>
+
+          {bundle && (
+            <section className="mt-6 rounded-lg border border-line bg-surface">
+              <h2 className="border-b border-line px-4 py-3 text-sm font-bold text-ink">
+                Comprados juntos com frequência
+              </h2>
+              <ul className="divide-y divide-line">
+                {bundle.companions.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 p-4">
+                    <Link to={`/produto/${p.id}`} className="shrink-0">
+                      <SmartImage
+                        src={p.image}
+                        alt={p.name}
+                        className="size-12 rounded-md object-cover"
+                      />
+                    </Link>
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/produto/${p.id}`}
+                        className="block truncate text-sm font-semibold text-ink hover:text-brand"
+                      >
+                        {p.name}
+                      </Link>
+                      <p className="text-sm font-bold text-ink">
+                        {formatBRL(p.price)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addItem(p, 1);
+                        toast.success(`${p.name} adicionado ao carrinho.`);
+                      }}
+                      className="shrink-0 rounded-md border border-brand px-3 py-1.5 text-xs font-semibold text-brand transition-colors hover:bg-brand-soft"
+                    >
+                      + Adicionar
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
+                <p className="text-sm text-ink-soft">
+                  Conjunto de {bundle.count} itens (incluindo{" "}
+                  <Link
+                    to={`/produto/${bundle.anchor.id}`}
+                    className="font-medium text-brand hover:underline"
+                  >
+                    {bundle.anchor.name}
+                  </Link>
+                  ) —{" "}
+                  <span className="font-bold text-ink">
+                    {formatBRL(bundle.total)}
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    bundle.companions.forEach((p) => addItem(p, 1));
+                    toast.success("Conjunto adicionado ao carrinho.");
+                  }}
+                  className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-dark"
+                >
+                  Adicionar conjunto
+                </button>
+              </div>
+            </section>
+          )}
 
           {saved.length > 0 && (
             <section className="mt-6 rounded-lg border border-line bg-surface">
@@ -586,10 +844,9 @@ export default function Cart() {
                     para o frete grátis
                   </p>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
-                    <motion.div
+                    <Bar
                       className="h-full rounded-full bg-brand"
-                      animate={{ width: `${freeProgress * 100}%` }}
-                      transition={{ type: "spring", stiffness: 120, damping: 20 }}
+                      style={{ width: `${freeProgress * 100}%` }}
                     />
                   </div>
                 </>
@@ -628,8 +885,46 @@ export default function Cart() {
               }`}
             >
               {couponMsg}
-            </p>
-          ) : null}
+              </p>
+            ) : null}
+              {showSuggestion && suggestion ? (
+                <div className="mt-3 rounded-md border border-brand bg-brand-soft p-3">
+                  <p className="text-xs text-ink">
+                    Você tem um cupom coletado com mais desconto:{" "}
+                    <span className="font-bold text-brand">
+                      {suggestion.coupon.code}
+                    </span>{" "}
+                    {suggestion.result.discount > 0 ? (
+                      <>— {formatBRL(suggestion.result.discount)} de desconto</>
+                    ) : (
+                      <>— frete grátis</>
+                    )}
+                    {applied ? (
+                      <>
+                        {" "}
+                        em vez de{" "}
+                        <span className="font-semibold">
+                          {applied.code}
+                        </span>
+                        {couponDiscount > 0 ? (
+                          <> ({formatBRL(couponDiscount)})</>
+                        ) : null}
+                        .
+                      </>
+                    ) : null}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setCoupon(suggestion.coupon.code);
+                      setCouponInput(suggestion.coupon.code);
+                      setCouponError(null);
+                    }}
+                    className="mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-dark"
+                  >
+                    Aplicar {suggestion.coupon.code}
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-4">
@@ -650,6 +945,14 @@ export default function Cart() {
               </p>
             </div>
 
+            {priceChanges.length > 0 && (
+              <p className="mt-4 rounded-md border border-line bg-rose-50 px-3 py-2 text-xs font-medium text-rose-600">
+                O preço de {priceChanges.length}{" "}
+                {priceChanges.length === 1 ? "item mudou" : "itens mudaram"} desde
+                que você adicionou ao carrinho. O total já reflete o valor atual.
+              </p>
+            )}
+
             <dl className="mt-5 space-y-3 text-sm">
               <div className="flex justify-between text-ink-soft">
                 <dt>
@@ -664,6 +967,14 @@ export default function Cart() {
                   −{formatBRL(couponDiscount + sellerDiscountTotal)}
                 </dd>
               </div>
+              {kitDiscountTotal > 0 && (
+                <div className="flex justify-between text-ink-soft">
+                  <dt>Kits (leve mais, pague menos)</dt>
+                  <dd className="font-semibold text-ship">
+                    −{formatBRL(kitDiscountTotal)}
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between text-ink-soft">
                 <dt>Frete</dt>
                 <dd
@@ -693,15 +1004,13 @@ export default function Cart() {
               </div>
             </dl>
 
-            <motion.button
-              whileHover={selectedCount > 0 ? { scale: 1.02 } : undefined}
-              whileTap={selectedCount > 0 ? { scale: 0.97 } : undefined}
+            <CheckoutBtn
               disabled={selectedCount === 0}
               onClick={() => navigate("/checkout")}
-              className="mt-6 w-full rounded-md bg-brand py-4 font-semibold text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-soft"
+              className="btn-brand mt-6 w-full rounded-md py-4 font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-soft"
             >
               {selectedCount > 0 ? "Finalizar compra" : "Selecione itens"}
-            </motion.button>
+            </CheckoutBtn>
             <p className="mt-3 text-center text-xs text-ink-soft">
               Pagamento 100% seguro · Até 12x sem juros
             </p>

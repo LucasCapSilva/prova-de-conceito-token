@@ -1,3 +1,5 @@
+import { freeShipThreshold } from "./loyalty.ts";
+
 export interface ShippingQuote {
   value: number;
   days: number;
@@ -29,13 +31,26 @@ export function quoteShipping(
 
   const sum = digits.split("").reduce((acc, c) => acc + Number(c), 0);
   const allFree = items.length > 0 && items.every((i) => i.freeShipping);
-  const free = subtotal > FREE_SHIPPING_THRESHOLD || allFree;
+  const free = subtotal > freeShipThreshold() || allFree;
   const days = 2 + (sum % 6);
 
   if (free) return { value: 0, days, free: true };
 
   const value = Math.round((19.9 + (sum % 30)) * 100) / 100;
   return { value, days, free: false };
+}
+
+/** Data de entrega estimada (hoje + prazo) para o CEP, ou null sem CEP válido. */
+export function estimateDeliveryDate(
+  cepRaw: string,
+  items: HasFreeShipping[],
+  subtotal: number
+): Date | null {
+  const q = quoteShipping(cepRaw, items, subtotal);
+  if (!q) return null;
+  const d = new Date();
+  d.setDate(d.getDate() + q.days);
+  return d;
 }
 
 /** As três opções de entrega (econômico, padrão e expresso) para o CEP. */

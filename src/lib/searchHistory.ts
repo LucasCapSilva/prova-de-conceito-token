@@ -1,23 +1,15 @@
-const KEY = "electronica:search:history";
+import { read, write } from "./storage";
+
+const KEY = "search:history";
 
 function load(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr.filter((t) => typeof t === "string").slice(0, 10);
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr.filter((t): t is string => typeof t === "string").slice(0, 10);
 }
 
 function persist(next: string[]): string[] {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* sem storage */
-  }
+  write(KEY, next);
   return next;
 }
 

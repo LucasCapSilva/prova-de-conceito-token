@@ -1,6 +1,8 @@
 import { Link, useParams } from "react-router-dom";
-import { motion } from "framer-motion";
+import type { ElementType } from "react";
+import { useMotion } from "../lib/motion";
 import { getOrder } from "../lib/orders";
+import { slotLabel } from "../lib/schedule";
 import { formatBRL } from "../lib/format";
 import SmartImage from "../components/SmartImage";
 
@@ -12,6 +14,9 @@ function etaLabel(iso: string) {
 export default function OrderConfirmation() {
   const { id } = useParams<{ id: string }>();
   const order = id ? getOrder(id) : undefined;
+  const m = useMotion();
+  const Panel: ElementType = m ? m.motion.div : "div";
+  const Badge: ElementType = m ? m.motion.span : "span";
 
   if (!order) {
     return (
@@ -32,20 +37,25 @@ export default function OrderConfirmation() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 pt-32 pb-12 sm:pt-28">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
+      <Panel
+        {...(m
+          ? { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } }
+          : {})}
         className="card p-6"
       >
         <div className="mb-6 flex flex-col items-center text-center">
-          <motion.span
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 260, damping: 16 }}
+          <Badge
+            {...(m
+              ? {
+                  initial: { scale: 0 },
+                  animate: { scale: 1 },
+                  transition: { type: "spring", stiffness: 260, damping: 16 },
+                }
+              : {})}
             className="flex h-14 w-14 items-center justify-center rounded-full bg-ship text-2xl text-white"
           >
             ✓
-          </motion.span>
+          </Badge>
           <h1 className="mt-4 text-2xl font-black text-ink">
             Pedido confirmado!
           </h1>
@@ -67,9 +77,20 @@ export default function OrderConfirmation() {
           </div>
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-ink-soft">
-              Entrega estimada
+              {order.pickup
+                ? "Pronto para retirada"
+                : order.schedule
+                  ? "Entrega agendada"
+                  : "Entrega estimada"}
             </p>
-            <p className="text-sm font-bold text-ink">{etaLabel(order.estimatedDate)}</p>
+            <p className="text-sm font-bold text-ink">
+              {etaLabel(order.estimatedDate)}
+              {order.schedule && (
+                <span className="block text-xs font-medium text-ink-soft">
+                  {slotLabel(order.schedule.slot)}
+                </span>
+              )}
+            </p>
           </div>
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-ink-soft">
@@ -78,6 +99,46 @@ export default function OrderConfirmation() {
             <p className="text-sm font-bold text-ink">{order.tracking}</p>
           </div>
         </div>
+
+        {order.pickup && (
+          <div className="mb-5 rounded-md border border-line p-3">
+            <p className="text-xs font-black uppercase tracking-wide text-ink-soft">
+              Ponto de coleta
+            </p>
+            <p className="mt-1 text-sm font-bold text-ink">
+              {order.pickup.point.name}
+            </p>
+            <p className="text-xs text-ink-soft">
+              {order.pickup.point.street}, {order.pickup.point.number} —{" "}
+              {order.pickup.point.neighborhood},{" "}
+              {order.pickup.point.city}/{order.pickup.point.state} — CEP{" "}
+              {order.pickup.point.cep}
+            </p>
+            <p className="text-xs text-ink-soft">
+              Funcionamento: {order.pickup.point.hours}
+            </p>
+            <p className="mt-1 text-xs font-bold text-ship">
+              Retire com um documento com foto. Frete grátis.
+            </p>
+          </div>
+        )}
+
+        {order.gift && (
+          <div className="mb-5 rounded-md border border-brand/40 bg-brand-soft p-3">
+            <p className="text-sm font-bold text-ink">
+              🎁 Embrulho para presente
+            </p>
+            {order.gift.message ? (
+              <p className="mt-1 text-xs italic text-ink-soft">
+                “{order.gift.message}”
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-ink-soft">
+                O pedido será embalado como presente.
+              </p>
+            )}
+          </div>
+        )}
 
         <h2 className="mb-2 text-sm font-black text-ink">Itens do pedido</h2>
         <ul className="mb-5 divide-y divide-line rounded-md border border-line">
@@ -122,6 +183,18 @@ export default function OrderConfirmation() {
               {order.shipping > 0 ? formatBRL(order.shipping) : "Grátis"}
             </dd>
           </div>
+          {order.gift && (
+            <div className="flex justify-between">
+              <dt className="text-ink-soft">Embrulho presente</dt>
+              <dd className="text-ink">{formatBRL(order.gift.fee)}</dd>
+            </div>
+          )}
+          {order.schedule && (
+            <div className="flex justify-between">
+              <dt className="text-ink-soft">Agendamento de entrega</dt>
+              <dd className="text-ink">{formatBRL(order.schedule.fee)}</dd>
+            </div>
+          )}
           <div className="flex items-center justify-between border-t border-line pt-2 text-base">
             <dt className="font-black text-ink">Total</dt>
             <dd className="font-black text-brand">{formatBRL(order.total)}</dd>
@@ -145,7 +218,7 @@ export default function OrderConfirmation() {
             Meus pedidos
           </Link>
         </div>
-      </motion.div>
+      </Panel>
     </div>
   );
 }

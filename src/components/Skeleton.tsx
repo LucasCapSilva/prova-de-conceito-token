@@ -33,7 +33,7 @@ export function ProductGridSkeleton({ count = 12 }: { count?: number }) {
     >
       <span className="sr-only">Carregando produtos…</span>
       {Array.from({ length: count }).map((_, i) => (
-        <CardSkeleton key={i} />
+        <CardSkeleton key={`skeleton-${i}`} />
       ))}
     </div>
   );
@@ -48,7 +48,7 @@ export function ProductDetailSkeleton() {
           <Skeleton className="aspect-square w-full" />
           <div className="flex gap-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="size-16" />
+              <Skeleton key={`thumb-${i}`} className="size-16" />
             ))}
           </div>
         </div>

@@ -1,9 +1,21 @@
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/authCore";
+import { useToasts } from "../context/toastsCore";
+import SellerGate from "../components/SellerGate";
 import { getSeller } from "../data/sellers";
 import { PRODUCTS } from "../data/products";
-import { getOrders } from "../lib/orders";
+import { getOrders, type Order } from "../lib/orders";
 import { formatBRL, formatCompact } from "../lib/format";
+import { sellerMetrics } from "../lib/sellerMetrics";
+import {
+  clearGoal,
+  getGoal,
+  monthInfo,
+  monthRevenueFor,
+  projectMonthEnd,
+  setGoal,
+} from "../lib/sellerGoals";
 
 function hashStr(s: string) {
   let h = 5381;
@@ -68,7 +80,7 @@ function SalesChart({ months, values }: { months: Date[]; values: number[] }) {
           ? month.toLocaleDateString("pt-BR", { month: "short" })
           : "";
         return (
-          <g key={i}>
+          <g key={month ? `${month.getFullYear()}-${month.getMonth()}` : `bar-${i}`}>
             <rect
               x={x}
               y={y}
@@ -149,40 +161,133 @@ function StatCard({
   );
 }
 
+function MonthlyGoal({
+  sellerId,
+  sellerName,
+  orders,
+}: {
+  sellerId: string;
+  sellerName: string;
+  orders: Order[];
+}) {
+  const { toast } = useToasts();
+  const [goal, setGoalValue] = useState<number | null>(() => getGoal(sellerId));
+  const [draft, setDraft] = useState("");
+
+  const revenue = monthRevenueFor(sellerName, orders);
+  const info = monthInfo();
+  const projection = goal !== null ? projectMonthEnd(revenue) : 0;
+  const pct = goal !== null ? Math.min(100, (revenue / goal) * 100) : 0;
+  const reached = goal !== null && revenue >= goal;
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const amount = Number(draft.replace(",", "."));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Informe um valor válido, maior que zero.");
+      return;
+    }
+    const saved = setGoal(sellerId, amount);
+    setGoalValue(saved);
+    setDraft("");
+    if (saved !== null) {
+      toast.success(`Meta mensal definida para ${formatBRL(saved)}.`);
+    }
+  }
+
+  function remove() {
+    clearGoal(sellerId);
+    setGoalValue(null);
+    toast.info("Meta mensal removida.");
+  }
+
+  return (
+    <section className="card mt-4 rounded-lg p-4">
+      <h2 className="text-sm font-bold text-ink">
+        Meta mensal de faturamento
+      </h2>
+      <p className="mt-1 text-[11px] text-ink-soft">
+        Defina um valor e acompanhe o progresso do mês com a projeção até o
+        fim do mês.
+      </p>
+      {goal === null ? (
+        <form onSubmit={submit} className="mt-3 flex max-w-sm items-center gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            inputMode="decimal"
+            placeholder="Ex.: 5000"
+            aria-label="Meta mensal em reais"
+            className="w-full rounded-[4px] border border-line bg-white px-3 py-2 text-sm text-ink outline-none focus:border-brand"
+          />
+          <button
+            type="submit"
+            className="btn-brand shrink-0 rounded-[6px] px-3 py-2 text-xs font-bold"
+          >
+            Definir meta
+          </button>
+        </form>
+      ) : (
+        <>
+          <div className="mt-3 flex items-baseline justify-between gap-2 text-sm">
+            <p className="font-bold text-ink">
+              {formatBRL(revenue)}{" "}
+              <span className="text-xs font-semibold text-ink-soft">
+                de {formatBRL(goal)}
+              </span>
+            </p>
+            <p className="text-xs font-semibold text-ink-soft">
+              {Math.round(pct)}%
+            </p>
+          </div>
+          <div
+            className="mt-2 h-3 overflow-hidden rounded-[2px] bg-brand-soft"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(pct)}
+            aria-label="Progresso da meta mensal"
+          >
+            <div
+              className="h-full rounded-[2px] bg-brand"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-soft">
+            <span>
+              {reached
+                ? "Meta batida 🎉"
+                : `Faltam ${formatBRL(goal - revenue)}`}
+            </span>
+            <span>Faltam {info.daysLeft} dias no mês</span>
+            <span>
+              Projeção até o fim do mês: {formatBRL(projection)}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={remove}
+            className="mt-3 text-xs font-semibold text-ink-soft underline transition hover:text-brand"
+          >
+            Remover meta
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function SellerDashboard() {
   const { user } = useAuth();
 
-  if (!user?.sellerId) {
+  const seller = user?.sellerId ? getSeller(user.sellerId) : undefined;
+  if (!user?.sellerId || !seller) {
     return (
-      <div className="mx-auto max-w-2xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
-        <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-          <span className="text-4xl">🏪</span>
-          <h1 className="text-lg font-black text-ink">
-            Painel do vendedor
-          </h1>
-          <p className="max-w-sm text-sm text-ink-soft">
-            Entre com uma conta de vendedor para gerenciar produtos, pedidos e
-            perguntas da sua loja.
-          </p>
-          <Link
-            to="/entrar"
-            className="btn-brand mt-1 rounded-[6px] px-4 py-2 text-sm font-bold"
-          >
-            Entrar como vendedor
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const seller = getSeller(user.sellerId);
-  if (!seller) {
-    return (
-      <div className="mx-auto max-w-2xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
-        <div className="card rounded-lg p-12 text-center text-sm text-ink-soft">
-          Vendedor não encontrado.
-        </div>
-      </div>
+      <SellerGate
+        icon="🏪"
+        title="Painel do vendedor"
+        description="Gerencie produtos, pedidos e perguntas da sua loja."
+      />
     );
   }
 
@@ -195,6 +300,12 @@ export default function SellerDashboard() {
   const pending = orders.filter(
     (o) => o.status === "confirmed" || o.status === "processing",
   ).length;
+
+  const allOrders = getOrders();
+  const metrics = sellerMetrics(seller.name, products, allOrders);
+  const noSaleProducts = products.filter((p) =>
+    metrics.noSaleProductIds.includes(p.id),
+  );
 
   const months = Array.from({ length: 12 }, (_, idx) => {
     const d = new Date();
@@ -240,6 +351,24 @@ export default function SellerDashboard() {
             className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
           >
             Perguntas
+          </Link>
+          <Link
+            to="/vendedor/promos"
+            className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+          >
+            Promoções
+          </Link>
+          <Link
+            to="/vendedor/cupons"
+            className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+          >
+            Cupons
+          </Link>
+          <Link
+            to="/vendedor/avaliacoes"
+            className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+          >
+            Avaliações
           </Link>
         </nav>
       </header>
@@ -318,6 +447,82 @@ export default function SellerDashboard() {
           </div>
         </dl>
       </section>
+
+      <section className="card mt-4 rounded-lg p-4">
+        <h2 className="text-sm font-bold text-ink">Métricas da loja</h2>
+        <p className="mt-1 text-[11px] text-ink-soft">
+          Derivadas dos pedidos gravados, com conversão simulada a partir das
+          visitas estimadas.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard
+            icon="🧮"
+            label="Ticket médio"
+            value={formatBRL(metrics.averageTicket)}
+            hint={`Em ${metrics.orderCount} pedido${metrics.orderCount === 1 ? "" : "s"}`}
+          />
+          <StatCard
+            icon="📈"
+            label="Taxa de conversão"
+            value={`${metrics.conversionRate.toFixed(1)}%`}
+            hint={`${metrics.visits} visitas · ${metrics.orderCount} pedidos`}
+          />
+          <StatCard
+            icon="🏆"
+            label="Mais vendido"
+            value={
+              metrics.topProduct ? metrics.topProduct.name : "Sem vendas ainda"
+            }
+            hint={
+              metrics.topProduct
+                ? `${metrics.topProduct.qty} unidades vendidas`
+                : "Finalize um pedido para começar"
+            }
+          />
+          <StatCard
+            icon="🚫"
+            label="Sem venda em 30 dias"
+            value={String(metrics.noSaleProductIds.length)}
+            hint={
+              metrics.noSaleProductIds.length === 0
+                ? "Todos os produtos venderam"
+                : "Produtos sem venda no período"
+            }
+          />
+        </div>
+        {noSaleProducts.length > 0 && (
+          <div className="mt-3 rounded-md border border-line bg-page p-3">
+            <p className="text-[11px] font-semibold text-ink-soft">
+              Produtos sem venda nos últimos 30 dias
+            </p>
+            <ul className="mt-2 flex flex-col gap-1 text-xs text-ink">
+              {noSaleProducts.slice(0, 8).map((p) => (
+                <li key={p.id} className="flex items-center gap-2">
+                  <span className="size-1.5 rounded-full bg-line" aria-hidden />
+                  {p.name}
+                </li>
+              ))}
+            </ul>
+            {noSaleProducts.length > 8 && (
+              <p className="mt-1 text-[11px] text-ink-soft">
+                e mais {noSaleProducts.length - 8} produtos…
+              </p>
+            )}
+            <Link
+              to="/vendedor/produtos"
+              className="mt-2 inline-block text-xs font-bold text-brand hover:underline"
+            >
+              Rever preços e estoque →
+            </Link>
+          </div>
+        )}
+      </section>
+
+      <MonthlyGoal
+        sellerId={seller.id}
+        sellerName={seller.name}
+        orders={allOrders}
+      />
     </div>
   );
 }

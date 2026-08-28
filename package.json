@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "check": "npm run lint && npm run build && npm run budget && npm test",
+    "budget": "node scripts/budget.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

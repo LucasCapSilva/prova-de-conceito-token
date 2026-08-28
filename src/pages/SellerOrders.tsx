@@ -6,10 +6,12 @@ import {
   getOrders,
   advanceOrderStatus,
   nextStatusOf,
+  sellerOrdersCsv,
   type Order,
   type OrderStatus,
 } from "../lib/orders";
 import { formatBRL, formatDate } from "../lib/format";
+import SellerGate from "../components/SellerGate";
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   confirmed: "Confirmado",
@@ -35,6 +37,28 @@ function sellerItems(o: Order, sellerName: string) {
   return o.items.filter((it) => it.seller === sellerName);
 }
 
+function exportCsv(sellerName: string, orders: Order[]) {
+  const csv =
+    "\uFEFF" +
+    sellerOrdersCsv(
+      sellerName,
+      orders.filter((o) =>
+        o.items.some((it) => it.seller === sellerName),
+      ),
+    );
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pedidos-${sellerName
+    .toLowerCase()
+    .replace(/\s+/g, "-")}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function SellerOrders() {
   const { user } = useAuth();
   const [, setTick] = useState(0);
@@ -49,24 +73,11 @@ export default function SellerOrders() {
 
   if (!user?.sellerId || !seller) {
     return (
-      <div className="mx-auto max-w-2xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
-        <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-          <span className="text-4xl" aria-hidden>
-            🏪
-          </span>
-          <h1 className="text-lg font-black text-ink">Pedidos do vendedor</h1>
-          <p className="max-w-sm text-sm text-ink-soft">
-            Entre com uma conta de vendedor para acompanhar e atualizar os
-            pedidos que contêm produtos da sua loja.
-          </p>
-          <Link
-            to="/entrar"
-            className="btn-brand mt-1 rounded-[6px] px-4 py-2 text-sm font-bold"
-          >
-            Entrar como vendedor
-          </Link>
-        </div>
-      </div>
+      <SellerGate
+        icon="🏪"
+        title="Pedidos do vendedor"
+        description="Acompanhe e atualize os pedidos que contêm produtos da sua loja."
+      />
     );
   }
 
@@ -101,6 +112,15 @@ export default function SellerOrders() {
           >
             Perguntas
           </Link>
+          {orders.length > 0 && (
+            <button
+              type="button"
+              onClick={() => exportCsv(seller.name, orders)}
+              className="rounded-[6px] border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-brand hover:text-brand"
+            >
+              ⬇ Exportar CSV
+            </button>
+          )}
         </nav>
       </header>
 
@@ -183,6 +203,7 @@ export default function SellerOrders() {
                         width={24}
                         height={24}
                         loading="lazy"
+                        decoding="async"
                         className="size-6 rounded border border-line object-cover"
                       />
                       <span className="line-clamp-1 max-w-44">

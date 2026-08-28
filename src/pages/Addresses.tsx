@@ -118,7 +118,10 @@ export default function Addresses() {
       ) : (
         <ul className="space-y-3">
           {list.map((a, i) => (
-            <li key={i} className="card flex items-start justify-between gap-3 rounded-lg p-4">
+            <li
+              key={`${a.cep}-${a.street}-${a.number}-${a.name}`}
+              className="card flex items-start justify-between gap-3 rounded-lg p-4"
+            >
               <div>
                 <p className="text-sm font-bold text-ink">
                   {a.name}

@@ -8,6 +8,7 @@ import {
 } from "../lib/follows";
 import { formatCompact } from "../lib/format";
 import SmartImage from "../components/SmartImage";
+import EmptyState from "../components/EmptyState";
 
 export default function FollowedStores() {
   const [follows, setFollows] = useState<string[]>(() => getFollows());
@@ -36,21 +37,12 @@ export default function FollowedStores() {
       </header>
 
       {stores.length === 0 ? (
-        <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-          <span className="text-4xl" aria-hidden>
-            🏬
-          </span>
-          <p className="max-w-sm text-sm text-ink-soft">
-            Siga lojas dos produtos que você gosta para acompanhar novidades e
-            ofertas aqui.
-          </p>
-          <Link
-            to="/produtos"
-            className="btn-brand mt-1 rounded-[6px] px-4 py-2 text-sm font-bold"
-          >
-            Ver catálogo
-          </Link>
-        </div>
+        <EmptyState
+          icon="store"
+          title="Nenhuma loja seguida"
+          message="Siga lojas dos produtos que você gosta para acompanhar novidades e ofertas aqui."
+          cta={{ to: "/produtos", label: "Ver catálogo" }}
+        />
       ) : (
         <ul className="space-y-3">
           {stores.map((s) => (
@@ -59,6 +51,8 @@ export default function FollowedStores() {
                 <SmartImage
                   src={s.logo}
                   alt={s.name}
+                  width={200}
+                  height={200}
                   className="size-14 shrink-0 rounded-md object-cover"
                 />
                 <div className="min-w-0 flex-1">

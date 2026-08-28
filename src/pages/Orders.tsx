@@ -5,6 +5,7 @@ import { formatBRL, formatDate } from "../lib/format";
 import { getProduct } from "../data/products";
 import { maxQtyFor } from "../lib/variants";
 import { useCart } from "../context/cartCore";
+import EmptyState from "../components/EmptyState";
 
 const STATUS_LABEL: Record<string, string> = {
   confirmed: "Confirmado",
@@ -74,20 +75,12 @@ export default function Orders() {
       </div>
 
       {orders.length === 0 ? (
-        <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-          <span className="text-4xl">📦</span>
-          <p className="text-sm font-semibold text-ink">Nenhum pedido ainda</p>
-          <p className="max-w-xs text-xs text-ink-soft">
-            Quando você finalizar uma compra, ela aparece aqui para você
-            acompanhar.
-          </p>
-          <Link
-            to="/produtos"
-            className="btn-brand mt-1 rounded-[6px] px-4 py-2 text-sm font-bold"
-          >
-            Ver produtos
-          </Link>
-        </div>
+        <EmptyState
+          icon="package"
+          title="Nenhum pedido ainda"
+          message="Quando você finalizar uma compra, ela aparece aqui para você acompanhar."
+          cta={{ to: "/produtos", label: "Ver produtos" }}
+        />
       ) : (
         <ul className="space-y-3">
           {orders.map((o) => (
@@ -103,7 +96,10 @@ export default function Orders() {
                         Nº {o.tracking}
                       </span>
                       <span className="rounded bg-brand-soft px-2 py-0.5 text-[11px] font-bold text-brand">
-                        {STATUS_LABEL[o.status] ?? o.status}
+                        {o.pickup &&
+                        (o.status === "delivered" || o.status === "shipped")
+                          ? "Retirado"
+                          : STATUS_LABEL[o.status] ?? o.status}
                       </span>
                     </div>
                     <p className="mt-1 text-sm font-bold text-ink">
@@ -122,6 +118,10 @@ export default function Orders() {
                           src={it.image}
                           alt=""
                           aria-hidden
+                          width={900}
+                          height={900}
+                          loading="lazy"
+                          decoding="async"
                           className="size-9 rounded object-cover ring-2 ring-white"
                         />
                       ))}

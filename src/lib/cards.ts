@@ -1,3 +1,5 @@
+import { read, write } from "./storage";
+
 export interface SavedCard {
   id: string;
   last4: string;
@@ -7,26 +9,15 @@ export interface SavedCard {
   primary: boolean;
 }
 
-const KEY = "electronica:cards";
+const KEY = "cards";
 
 function load(): SavedCard[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    return Array.isArray(data) ? (data as SavedCard[]) : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  return Array.isArray(raw) ? (raw as SavedCard[]) : [];
 }
 
 function persist(list: SavedCard[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
+  write(KEY, list);
 }
 
 export function getCards(): SavedCard[] {

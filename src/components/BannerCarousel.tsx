@@ -13,9 +13,9 @@ export type Banner = {
 };
 
 const TONES: Record<Banner["tone"], string> = {
-  brand: "bg-gradient-to-r from-brand to-[#ff6b3d]",
+  brand: "bg-gradient-to-r from-brand to-[#c2551e]",
   dark: "bg-ink",
-  teal: "bg-gradient-to-r from-ship to-[#00a88f]",
+  teal: "bg-gradient-to-r from-ship to-[#005f4e]",
 };
 
 const AUTO_MS = 5000;

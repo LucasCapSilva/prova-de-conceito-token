@@ -1,23 +1,15 @@
-const KEY = "electronica:coupons";
+import { read, write } from "./storage";
+
+const KEY = "coupons";
 
 function load(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is string => typeof v === "string");
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr.filter((v): v is string => typeof v === "string");
 }
 
 function persist(ids: string[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(ids));
-  } catch {
-    /* sem persistência */
-  }
+  write(KEY, ids);
 }
 
 export function getCollected(): string[] {

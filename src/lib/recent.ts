@@ -1,35 +1,28 @@
 import { getProduct, type Product } from "../data/products";
+import { read, write } from "./storage";
 
-const KEY = "electronica:recent";
+const KEY = "recent";
 const MAX = 8;
 
-function read(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const arr = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(arr) ? (arr.filter(Boolean) as string[]) : [];
-  } catch {
-    return [];
-  }
+function load(): string[] {
+  const raw = read<unknown>(KEY, []);
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr.filter((x): x is string => typeof x === "string");
 }
 
-function write(ids: string[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(ids));
-  } catch {
-    /* storage indisponível — ignora */
-  }
+function persist(ids: string[]) {
+  write(KEY, ids);
 }
 
 /** Registra um produto como visto (topo da fila, sem duplicatas, máx. 8). */
 export function addViewed(id: string) {
-  const next = [id, ...read().filter((x) => x !== id)].slice(0, MAX);
-  write(next);
+  const next = [id, ...load().filter((x) => x !== id)].slice(0, MAX);
+  persist(next);
 }
 
 /** Ids de produtos vistos, do mais recente ao mais antigo. */
 export function getViewedIds(): string[] {
-  return read();
+  return load();
 }
 
 /** Produtos vistos (ids resolvidos p/ `Product`), excluindo o opcional. */
@@ -42,5 +35,5 @@ export function getViewedProducts(excludeId?: string): Product[] {
 
 /** Limpa o histórico (útil p/ "esquecer" / privacidade). */
 export function clearViewed() {
-  write([]);
+  persist([]);
 }

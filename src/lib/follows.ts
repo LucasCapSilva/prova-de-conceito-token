@@ -1,24 +1,15 @@
-const KEY = "electronica:follows";
+import { read, write } from "./storage";
+
+const KEY = "follows";
 
 function load(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((x): x is string => typeof x === "string")
-      : [];
-  } catch {
-    return [];
-  }
+  const raw = read<unknown>(KEY, []);
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr.filter((x): x is string => typeof x === "string");
 }
 
 function persist(ids: string[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(ids));
-  } catch {
-    /* sem persistência */
-  }
+  write(KEY, ids);
 }
 
 export function getFollows(): string[] {

@@ -50,6 +50,12 @@ export default function Coins() {
           >
             Usar moedas no carrinho
           </Link>
+          <Link
+            to="/cashback"
+            className="mt-2 ml-2 inline-block text-xs font-bold text-brand underline underline-offset-2 transition hover:text-brand-dark"
+          >
+            Ver meu cashback →
+          </Link>
         </section>
 
         <section className="card p-5">

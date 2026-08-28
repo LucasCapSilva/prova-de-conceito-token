@@ -1,9 +1,9 @@
-import { useState, useMemo, useRef, useEffect, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCart } from "../context/cartCore";
 import { useFavorites } from "../context/favoritesCore";
 import { useAuth } from "../context/authCore";
-import { PRODUCTS, CATEGORIES } from "../data/products";
+import { PRODUCTS, CATEGORIES, getProduct } from "../data/products";
 import { formatBRL } from "../lib/format";
 import {
   getNotifPrefs,
@@ -17,6 +17,16 @@ import {
   removeSearchHistory,
 } from "../lib/searchHistory";
 import { useTheme } from "../lib/theme";
+import { searchMatch, normalizeSearch } from "../lib/search";
+import { readRaw, writeRaw } from "../lib/storage";
+import { getRestockAlerts } from "../lib/alerts";
+import { getFollows } from "../lib/follows";
+import { unreadCount as unreadNovidades } from "../lib/novidades";
+import { speechSupported, useVoiceSearch } from "../lib/useVoiceSearch";
+import { barcodeSupported, useBarcodeScan } from "../lib/useBarcodeScan";
+import { findProductByEan } from "../data/products";
+import { useToasts } from "../context/toastsCore";
+import Modal from "./Modal";
 import SmartImage from "./SmartImage";
 import ShortcutsHelp from "./ShortcutsHelp";
 import MegaMenu from "./MegaMenu";
@@ -26,10 +36,11 @@ const TOP_LINKS = [
   { to: "/ajuda", label: "Central de Ajuda" },
   { to: "/pedidos", label: "Meus pedidos" },
   { to: "/favoritos", label: "Favoritos" },
+  { to: "/novidades", label: "Novidades" },
 ];
 
 const NOTIFS: {
-  id: number;
+  id: string | number;
   icon: string;
   title: string;
   body: string;
@@ -70,7 +81,7 @@ const NOTIFS: {
   },
 ];
 
-const NOTIFS_KEY = "electronica:notifs:seen";
+const NOTIFS_KEY = "notifs:seen";
 
 interface Item {
   key: string;
@@ -100,13 +111,10 @@ export default function Navbar() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLElement | null>(null);
   const [prefs, setPrefs] = useState(() => getNotifPrefs());
-  const [seen, setSeen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(NOTIFS_KEY) !== null;
-    } catch {
-      return false;
-    }
-  });
+  const [seen, setSeen] = useState<boolean>(() =>
+    readRaw(NOTIFS_KEY) !== null
+  );
+  const novUnread = unreadNovidades(getFollows());
 
   useEffect(() => {
     const on = () => setPrefs(getNotifPrefs());
@@ -117,52 +125,76 @@ export default function Navbar() {
   const [history, setHistory] = useState<string[]>(() => getSearchHistory());
   const [theme, toggleTheme] = useTheme();
 
-  const visibleNotifs = NOTIFS.filter((n) => prefs[n.kind]);
+  const restockNotifs = getRestockAlerts().flatMap((a) => {
+    const p = getProduct(a.productId);
+    return p
+      ? [
+          {
+            id: `restock:${p.id}:${a.variantKey ?? ""}`,
+            icon: "📦",
+            title: `${p.name} — aviso de estoque`,
+            body: "Você será avisado quando este produto voltar ao estoque.",
+            to: `/produto/${p.id}`,
+          },
+        ]
+      : [];
+  });
+  const visibleNotifs = [
+    ...NOTIFS.filter((n) => prefs[n.kind]),
+    ...restockNotifs,
+  ];
   const unread = seen ? 0 : visibleNotifs.length;
 
   const openNotifs = () => {
     setNotifOpen(true);
     if (!seen) {
       setSeen(true);
-      try {
-        localStorage.setItem(NOTIFS_KEY, "1");
-      } catch {
-        /* sem storage */
-      }
+      writeRaw(NOTIFS_KEY, "1");
     }
   };
 
-  const suggestions = useMemo<Item[]>(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return [];
-    const prods = PRODUCTS.filter((p) =>
-      p.name.toLowerCase().includes(term)
-    ).slice(0, 5);
-    const cats = CATEGORIES.filter(
-      (c) => c.key !== "todos" && c.label.toLowerCase().includes(term)
-    ).slice(0, 2);
-    return [
-      ...prods.map<Item>((p) => ({
-        key: `p-${p.id}`,
-        kind: "product",
-        label: p.name,
-        to: `/produto/${p.id}`,
-        price: formatBRL(p.price),
-        image: p.image,
-      })),
-      ...cats.map<Item>((c) => ({
-        key: `c-${c.key}`,
-        kind: "category",
-        label: c.label,
-        to: `/categoria/${c.key}`,
-      })),
-      {
-        key: "s",
-        kind: "search",
-        label: `Buscar por "${q.trim()}"`,
-        to: `/busca?q=${encodeURIComponent(q.trim())}`,
-      },
-    ];
+  const [suggestions, setSuggestions] = useState<Item[]>([]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const term = q.trim().toLowerCase();
+      if (!term) {
+        setSuggestions([]);
+        return;
+      }
+      const prods = PRODUCTS.filter((p) => searchMatch(p.name, term)).slice(
+        0,
+        5
+      );
+      const cats = CATEGORIES.filter(
+        (c) =>
+          c.key !== "todos" &&
+          normalizeSearch(c.label).includes(normalizeSearch(term))
+      ).slice(0, 2);
+      setSuggestions([
+        ...prods.map<Item>((p) => ({
+          key: `p-${p.id}`,
+          kind: "product",
+          label: p.name,
+          to: `/produto/${p.id}`,
+          price: formatBRL(p.price),
+          image: p.image,
+        })),
+        ...cats.map<Item>((c) => ({
+          key: `c-${c.key}`,
+          kind: "category",
+          label: c.label,
+          to: `/categoria/${c.key}`,
+        })),
+        {
+          key: "s",
+          kind: "search",
+          label: `Buscar por "${q.trim()}"`,
+          to: `/busca?q=${encodeURIComponent(q.trim())}`,
+        },
+      ]);
+    }, 150);
+    return () => clearTimeout(t);
   }, [q]);
 
   const shown = open && suggestions.length > 0;
@@ -223,12 +255,68 @@ export default function Navbar() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const [voiceOk] = useState(() => speechSupported());
+
+  const runSearch = (term: string) => {
+    const clean = term.trim();
+    if (clean) setHistory(pushSearchHistory(clean));
+    setQ(clean);
+    navigate(clean ? `/busca?q=${encodeURIComponent(clean)}` : "/produtos");
+    setOpen(false);
+  };
+
+  const voice = useVoiceSearch((text, isFinal) => {
+    if (isFinal) runSearch(text);
+    else {
+      setQ(text);
+      setOpen(true);
+    }
+  });
+
+  const { toast } = useToasts();
+  const [scanOpen, setScanOpen] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [barcodeOk] = useState(() => barcodeSupported());
+
+  const barcode = useBarcodeScan((code) => {
+    const p = findProductByEan(code);
+    setScanOpen(false);
+    if (p) {
+      toast.success(`Produto encontrado: ${p.name}`);
+      navigate(`/produto/${p.id}`);
+    } else {
+      toast.error("Nenhum produto corresponde a esse código de barras.");
+    }
+  });
+  const { start: startScan, stop: stopScan } = barcode;
+
+  useEffect(() => {
+    if (scanOpen) void startScan();
+    else stopScan();
+  }, [scanOpen, startScan, stopScan]);
+
+  const openScanner = () => {
+    setManualCode("");
+    setManualError(null);
+    setScanOpen(true);
+  };
+
+  const submitManual = (e: FormEvent) => {
+    e.preventDefault();
+    const p = findProductByEan(manualCode);
+    if (p) {
+      setScanOpen(false);
+      toast.success(`Produto encontrado: ${p.name}`);
+      navigate(`/produto/${p.id}`);
+    } else {
+      setManualError("Nenhum produto corresponde a esse código.");
+    }
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const term = q.trim();
-    if (term) setHistory(pushSearchHistory(term));
-    navigate(term ? `/busca?q=${encodeURIComponent(term)}` : "/produtos");
-    setOpen(false);
+    runSearch(q);
   };
 
   const chooseHistory = (term: string) => {
@@ -276,13 +364,28 @@ export default function Navbar() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-gradient-to-r from-header-from to-header-to">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
-        <div className="hidden items-center justify-end gap-5 py-1.5 text-xs text-white/85 sm:flex">
+        <nav
+          aria-label="Links rápidos"
+          className="hidden items-center justify-end gap-5 py-1.5 text-xs text-white/85 sm:flex"
+        >
           {TOP_LINKS.map((l) => (
-            <Link key={l.label} to={l.to} className="hover:text-white">
+            <Link
+              key={l.label}
+              to={l.to}
+              className="flex items-center gap-1 hover:text-white"
+            >
               {l.label}
+              {l.to === "/novidades" && novUnread > 0 && (
+                <span
+                  className="grid min-w-4 place-items-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-brand"
+                  aria-label={`${novUnread} novidades não lidas`}
+                >
+                  {novUnread > 99 ? "99+" : novUnread}
+                </span>
+              )}
             </Link>
           ))}
-        </div>
+        </nav>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5 py-2.5 sm:flex-nowrap sm:gap-6 sm:py-3">
           <Link
@@ -314,6 +417,7 @@ export default function Navbar() {
             <form onSubmit={submit} className="relative">
               <input
                 ref={inputRef}
+                data-tour="busca"
                 value={q}
                 onChange={(e) => {
                   setQ(e.target.value);
@@ -332,8 +436,58 @@ export default function Navbar() {
                 aria-expanded={shown || historyShown}
                 aria-autocomplete="list"
                 aria-controls="busca-listbox"
-                className="h-11 w-full rounded-[4px] bg-white pl-4 pr-14 text-sm text-ink outline-none placeholder:text-ink-soft/70"
+                className="h-11 w-full rounded-[4px] bg-white pl-4 pr-[120px] text-sm text-ink outline-none placeholder:text-ink-soft/70"
               />
+              <button
+                type="button"
+                onClick={openScanner}
+                aria-label="Buscar por código de barras"
+                className="absolute right-[82px] top-1.5 grid size-8 place-items-center rounded-[2px] text-ink-soft transition-colors hover:bg-ink-soft/10"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <path d="M4 6v12" />
+                  <path d="M8 6v12" />
+                  <path d="M12 6v12" />
+                  <path d="M17 6v12" />
+                  <path d="M20 6v12" />
+                </svg>
+              </button>
+              {voiceOk && (
+                <button
+                  type="button"
+                  onClick={() => (voice.listening ? voice.stop() : voice.start())}
+                  aria-label={voice.listening ? "Parar busca por voz" : "Buscar por voz"}
+                  aria-pressed={voice.listening}
+                  className={`absolute right-11 top-1.5 grid size-8 place-items-center rounded-[2px] transition-colors ${
+                    voice.listening
+                      ? "bg-[#D93026] text-white animate-pulse"
+                      : "text-ink-soft hover:bg-ink-soft/10"
+                  }`}
+                >
+                  <svg
+                    width="17"
+                    height="17"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                    <path d="M5 11a7 7 0 0 0 14 0" />
+                    <path d="M12 18v3" />
+                  </svg>
+                </button>
+              )}
               <button
                 type="submit"
                 aria-label="Buscar"
@@ -520,6 +674,7 @@ export default function Navbar() {
 
             <Link
               to="/favoritos"
+              data-tour="favoritos"
               aria-label="Favoritos"
               className="relative grid size-11 shrink-0 place-items-center text-white"
             >
@@ -622,11 +777,33 @@ export default function Navbar() {
               type="button"
               onClick={toggleTheme}
               aria-label={
-                theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"
+                theme === "light"
+                  ? "Ativar tema escuro"
+                  : theme === "dark"
+                    ? "Ativar modo de alto contraste"
+                    : "Ativar tema claro"
               }
               className="grid size-11 place-items-center text-white"
             >
-              {theme === "light" ? (
+              {theme === "dark" ? (
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path
+                    d="M12 3a9 9 0 0 1 0 18V3z"
+                    fill="currentColor"
+                    stroke="none"
+                  />
+                </svg>
+              ) : theme === "light" ? (
                 <svg
                   width="22"
                   height="22"
@@ -659,6 +836,7 @@ export default function Navbar() {
             {user ? (
               <Link
                 to="/entrar"
+                data-tour="conta"
                 aria-label="Minha conta"
                 className="hidden items-center gap-1.5 pl-1 text-sm text-white md:flex"
               >
@@ -672,6 +850,7 @@ export default function Navbar() {
             ) : (
               <Link
                 to="/entrar"
+                data-tour="conta"
                 aria-label="Entrar"
                 className="grid size-11 place-items-center text-white"
               >
@@ -693,6 +872,7 @@ export default function Navbar() {
 
             <Link
               to="/carrinho"
+              data-tour="carrinho"
               aria-label="Carrinho"
               className="relative grid size-11 shrink-0 place-items-center text-white"
             >
@@ -733,9 +913,17 @@ export default function Navbar() {
                 <Link
                   to={l.to}
                   onClick={() => setMenuOpen(false)}
-                  className="block border-b border-white/10 px-1 py-3 text-sm text-white transition-colors last:border-0 hover:bg-white/10"
+                  className="flex items-center justify-between border-b border-white/10 px-1 py-3 text-sm text-white transition-colors last:border-0 hover:bg-white/10"
                 >
                   {l.label}
+                  {l.to === "/novidades" && novUnread > 0 && (
+                    <span
+                      className="grid min-w-5 place-items-center rounded-full bg-white px-1.5 text-[11px] font-bold leading-5 text-brand"
+                      aria-label={`${novUnread} novidades não lidas`}
+                    >
+                      {novUnread > 99 ? "99+" : novUnread}
+                    </span>
+                  )}
                 </Link>
               </li>
             ))}
@@ -751,6 +939,78 @@ export default function Navbar() {
           </ul>
         </nav>
       )}
+
+      <Modal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        title="Código de barras"
+      >
+        {barcodeOk ? (
+          <div className="relative overflow-hidden rounded-[4px] border border-line bg-black">
+            <video
+              ref={barcode.videoRef}
+              autoPlay
+              muted
+              playsInline
+              className="aspect-[4/3] w-full object-cover"
+            />
+            {barcode.scanning && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-2">
+                <span className="rounded-[3px] bg-black/60 px-2 py-1 text-xs font-semibold text-white">
+                  Aponte a câmera para o código de barras
+                </span>
+              </div>
+            )}
+            {barcode.error && (
+              <div className="absolute inset-0 grid place-items-center p-4">
+                <p
+                  role="alert"
+                  className="text-center text-sm font-semibold text-white"
+                >
+                  {barcode.error}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-ink-soft">
+            Seu navegador não suporta leitura por câmera. Digite o código
+            manualmente abaixo.
+          </p>
+        )}
+        <form onSubmit={submitManual} className="mt-3">
+          <label
+            htmlFor="barcode-manual"
+            className="text-sm font-bold text-ink"
+          >
+            Ou digite o código manualmente
+          </label>
+          <div className="mt-1.5 flex gap-2">
+            <input
+              id="barcode-manual"
+              value={manualCode}
+              onChange={(e) => {
+                setManualCode(e.target.value);
+                setManualError(null);
+              }}
+              inputMode="numeric"
+              placeholder="Ex.: 7891234567890"
+              className="h-10 w-full rounded-[4px] border border-line bg-surface px-3 text-sm text-ink outline-none focus:border-brand"
+            />
+            <button
+              type="submit"
+              className="btn-brand h-10 shrink-0 rounded-[4px] px-4 text-sm font-bold"
+            >
+              Buscar
+            </button>
+          </div>
+          {manualError && (
+            <p role="alert" className="mt-1.5 text-xs font-semibold text-[#D93026]">
+              {manualError}
+            </p>
+          )}
+        </form>
+      </Modal>
 
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </header>

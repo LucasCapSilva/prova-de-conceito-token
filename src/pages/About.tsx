@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import type { ElementType } from "react";
+import { useMotion } from "../lib/motion";
 import Reveal from "../components/Reveal";
 
 const VALUES = [
@@ -47,6 +48,12 @@ const TEAM = [
 ];
 
 export default function About() {
+  const m = useMotion();
+  const MSpan: ElementType = m ? m.motion.span : "span";
+  const MH1: ElementType = m ? m.motion.h1 : "h1";
+  const MP: ElementType = m ? m.motion.p : "p";
+  const MDiv: ElementType = m ? m.motion.div : "div";
+
   return (
     <div className="pt-32 sm:pt-28">
       {/* HERO */}
@@ -54,32 +61,41 @@ export default function About() {
         <div className="absolute -left-32 top-10 size-96 rounded-full bg-brand-soft blur-[120px]" />
         <div className="absolute -right-24 top-40 size-96 rounded-full bg-ship/10 blur-[120px]" />
         <div className="relative mx-auto max-w-4xl px-6 py-16 text-center">
-          <motion.span
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+          <MSpan
+            {...(m
+              ? { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 } }
+              : {})}
             className="inline-block rounded-full bg-brand-soft px-4 py-1.5 text-xs font-semibold tracking-widest text-brand"
           >
             NOSSA HISTÓRIA
-          </motion.span>
-          <motion.h1
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
+          </MSpan>
+          <MH1
+            {...(m
+              ? {
+                  initial: { opacity: 0, y: 30 },
+                  animate: { opacity: 1, y: 0 },
+                  transition: { delay: 0.15 },
+                }
+              : {})}
             className="mt-6 text-4xl font-bold leading-tight text-ink sm:text-6xl"
           >
             Conectando pessoas ao <span className="text-brand">futuro</span> desde 2019
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.35 }}
+          </MH1>
+          <MP
+            {...(m
+              ? {
+                  initial: { opacity: 0 },
+                  animate: { opacity: 1 },
+                  transition: { delay: 0.35 },
+                }
+              : {})}
             className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ink-soft"
           >
             A Electronica nasceu de uma frustração simples: comprar eletrônicos
             bons era caro, confuso e impessoal. Quisemos mudar isso — e
             criamos uma loja onde cada produto é escolhido com cuidado, cada
             pedido é tratado com obsessão e cada cliente vira comunidade.
-          </motion.p>
+          </MP>
         </div>
       </section>
 
@@ -133,8 +149,8 @@ export default function About() {
         <div className="mt-10 grid gap-6 sm:grid-cols-2">
           {VALUES.map((v, i) => (
             <Reveal key={v.title} delay={i * 0.08}>
-              <motion.div
-                whileHover={{ y: -8 }}
+              <MDiv
+                {...(m ? { whileHover: { y: -8 } } : {})}
                 className="h-full rounded-xl border border-line bg-surface p-7 transition-colors hover:border-brand/40"
               >
                 <span className="grid size-14 place-items-center rounded-xl bg-brand-soft text-2xl">
@@ -143,8 +159,8 @@ export default function About() {
                 <h3 className="mt-5 text-xl font-semibold text-ink">
                   {v.title}
                 </h3>
-                <p className="mt-2 leading-relaxed text-ink-soft">{v.text}</p>
-              </motion.div>
+                  <p className="mt-2 leading-relaxed text-ink-soft">{v.text}</p>
+              </MDiv>
             </Reveal>
           ))}
         </div>
@@ -158,17 +174,17 @@ export default function About() {
           </h2>
         </Reveal>
         <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {TEAM.map((m, i) => (
-            <Reveal key={m.name} delay={i * 0.1}>
+          {TEAM.map((member, i) => (
+            <Reveal key={member.name} delay={i * 0.1}>
               <div className="rounded-xl border border-line bg-surface p-7 text-center transition-colors hover:border-brand/40">
-                <motion.div
-                  whileHover={{ scale: 1.08, rotate: 4 }}
+                <MDiv
+                  {...(m ? { whileHover: { scale: 1.08, rotate: 4 } } : {})}
                   className="mx-auto grid size-20 place-items-center rounded-full bg-brand text-2xl font-bold text-white"
                 >
-                  {m.initials}
-                </motion.div>
-                <h3 className="mt-5 font-semibold text-ink">{m.name}</h3>
-                <p className="mt-1 text-sm text-ink-soft">{m.role}</p>
+                  {member.initials}
+                </MDiv>
+                <h3 className="mt-5 font-semibold text-ink">{member.name}</h3>
+                <p className="mt-1 text-sm text-ink-soft">{member.role}</p>
               </div>
             </Reveal>
           ))}

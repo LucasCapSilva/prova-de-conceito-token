@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { PRODUCTS } from "../data/products";
 import SmartImage from "./SmartImage";
 import Price from "./Price";
+import { preloadPath } from "../lib/preload";
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -109,6 +110,7 @@ export default function FlashSale() {
                 <Link
                   key={p.id}
                   to={`/produto/${p.id}`}
+                  onMouseEnter={() => preloadPath(`/produto/${p.id}`)}
                   className="w-40 shrink-0 snap-start sm:w-44"
                 >
                   <div className="relative overflow-hidden rounded-lg border border-line bg-surface">

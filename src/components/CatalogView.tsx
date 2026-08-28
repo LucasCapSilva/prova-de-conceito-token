@@ -5,43 +5,70 @@ import ProductCard from "./ProductCard";
 import Breadcrumbs, { type Crumb } from "./Breadcrumbs";
 import FilterPanel from "./FilterPanel";
 import Pagination from "./Pagination";
+import VirtualGrid from "./VirtualGrid";
 import { ProductGridSkeleton } from "./Skeleton";
 import { useSimulatedLoading } from "../lib/useLoading";
+import EmptyState from "./EmptyState";
 import {
   parseState,
   buildParams,
   filterProducts,
+  facetCounts,
   countActiveFilters,
+  paginate,
+  PAGE_SIZE,
   SORT_OPTIONS,
   type CatalogState,
   type SortKey,
 } from "../lib/catalog";
-
-const PAGE_SIZE = 12;
+import { formatBRL } from "../lib/format";
+import { useToasts } from "../context/toastsCore";
+import {
+  getSavedFilters,
+  saveFilter,
+  removeSavedFilter,
+  type SavedFilter,
+} from "../lib/savedFilters";
 
 interface Props {
   title: string;
   subtitle?: string;
   fixedCat?: Category;
+  fixedBrand?: string;
   crumbs?: Crumb[];
 }
 
-export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props) {
+export default function CatalogView({
+  title,
+  subtitle,
+  fixedCat,
+  fixedBrand,
+  crumbs,
+}: Props) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
 
   const state = useMemo<CatalogState>(() => {
     const s = parseState(params);
     if (fixedCat) s.cat = fixedCat;
+    if (fixedBrand) s.brand = fixedBrand;
     return s;
-  }, [params, fixedCat]);
+  }, [params, fixedCat, fixedBrand]);
 
   const items = useMemo(() => filterProducts(state), [state]);
+  const counts = useMemo(() => facetCounts(state), [state]);
   const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   const page = Math.min(state.page, pages);
-  const pageItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageItems = paginate(items, page);
   const activeCount = countActiveFilters(state);
   const loading = useSimulatedLoading(500);
+  const { toast } = useToasts();
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(() =>
+    getSavedFilters(),
+  );
+  const [savingFilter, setSavingFilter] = useState(false);
+  const [filterName, setFilterName] = useState("");
+  const [savedSel, setSavedSel] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersBtnRef = useRef<HTMLButtonElement>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
@@ -97,6 +124,100 @@ export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props
     }
   };
 
+  const canSave = countActiveFilters(state) > 0 || state.q !== "";
+
+  const applySaved = (id: string) => {
+    const f = savedFilters.find((x) => x.id === id);
+    setSavedSel(id);
+    if (!f) return;
+    patch({ ...f.state, page: 1 }, false);
+  };
+
+  const doSaveFilter = () => {
+    const name = filterName.trim();
+    if (!name) return;
+    setSavedFilters(saveFilter(name, state));
+    setFilterName("");
+    setSavingFilter(false);
+    toast.success(`Filtro "${name}" salvo`);
+  };
+
+  const doRemoveSaved = (id: string) => {
+    setSavedFilters(removeSavedFilter(id));
+    setSavedSel("");
+    toast.info("Filtro salvo removido");
+  };
+
+  const chips: { key: string; label: string; remove: () => void }[] = [];
+  if (state.q)
+    chips.push({
+      key: "q",
+      label: `Busca: "${state.q}"`,
+      remove: () => patch({ q: "" }),
+    });
+  const catLabel = CATEGORIES.find((c) => c.key === state.cat)?.label;
+  if (state.cat !== "todos" && catLabel)
+    chips.push({
+      key: "cat",
+      label: catLabel,
+      remove: () => patch({ cat: "todos" }),
+    });
+  if (state.min)
+    chips.push({
+      key: "min",
+      label: `Mín. ${formatBRL(Number(state.min))}`,
+      remove: () => patch({ min: "" }),
+    });
+  if (state.max)
+    chips.push({
+      key: "max",
+      label: `Máx. ${formatBRL(Number(state.max))}`,
+      remove: () => patch({ max: "" }),
+    });
+  if (state.rating)
+    chips.push({
+      key: "rating",
+      label: `A partir de ${state.rating} estrelas`,
+      remove: () => patch({ rating: "" }),
+    });
+  if (state.condition !== "todos")
+    chips.push({
+      key: "condition",
+      label: state.condition === "novo" ? "Somente novos" : "Somente usados",
+      remove: () => patch({ condition: "todos" }),
+    });
+  if (state.brand)
+    chips.push({
+      key: "brand",
+      label: `Marca: ${state.brand}`,
+      remove: () => patch({ brand: "" }),
+    });
+  if (state.freeShip)
+    chips.push({
+      key: "freeShip",
+      label: "Frete grátis",
+      remove: () => patch({ freeShip: false }),
+    });
+  if (state.official)
+    chips.push({
+      key: "official",
+      label: "Vendedor oficial",
+      remove: () => patch({ official: false }),
+    });
+  if (state.discountOnly)
+    chips.push({
+      key: "discount",
+      label: "Somente com desconto",
+      remove: () => patch({ discountOnly: false }),
+    });
+  if (state.installments)
+    chips.push({
+      key: "installments",
+      label:
+        state.installments === "6" ? "Até 6x sem juros" : "10x ou mais",
+      remove: () => patch({ installments: "" }),
+    });
+
   return (
     <div className="mx-auto max-w-7xl px-4 pt-32 pb-12 sm:px-6 sm:pt-28">
       <div className="mb-5">
@@ -105,7 +226,7 @@ export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props
           {title}
         </h1>
         {subtitle && <p className="mt-1 text-sm text-ink-soft">{subtitle}</p>}
-        <p className="mt-2 text-xs text-ink-soft">
+        <p role="status" className="mt-2 text-xs text-ink-soft">
           <span className="font-bold text-ink">{items.length}</span> produto
           {items.length === 1 ? "" : "s"} encontrado{items.length === 1 ? "" : "s"}
         </p>
@@ -125,21 +246,57 @@ export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props
           <div className="mb-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
             {CATEGORIES.map((c) => {
               const active = state.cat === c.key;
+              const n = counts.cats[c.key] ?? 0;
+              const disabled = !active && n === 0;
               return (
                 <button
                   key={c.key}
                   onClick={() => goCat(c.key)}
+                  disabled={disabled}
                   className={`whitespace-nowrap rounded-[4px] border px-3 py-1.5 text-xs font-semibold transition-colors ${
                     active
                       ? "border-brand bg-brand text-white"
-                      : "border-line bg-surface text-ink hover:border-brand hover:text-brand"
+                      : disabled
+                        ? "cursor-not-allowed border-line bg-surface text-ink-soft/50"
+                        : "border-line bg-surface text-ink hover:border-brand hover:text-brand"
                   }`}
                 >
-                  {c.label}
+                  {c.label} ({n})
                 </button>
               );
             })}
           </div>
+
+          {chips.length > 0 && (
+            <div
+              className="mb-3 flex flex-wrap items-center gap-2"
+              aria-label="Filtros ativos"
+            >
+              {chips.map((chip) => (
+                <span
+                  key={chip.key}
+                  className="flex items-center gap-1 rounded-[4px] border border-brand/40 bg-brand-soft px-2 py-1 text-xs font-semibold text-ink"
+                >
+                  {chip.label}
+                  <button
+                    type="button"
+                    onClick={chip.remove}
+                    aria-label={`Remover filtro ${chip.label}`}
+                    className="text-brand hover:text-brand-dark"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button
+                type="button"
+                onClick={clearAll}
+                className="text-xs font-semibold text-brand hover:underline"
+              >
+                Limpar tudo
+              </button>
+            </div>
+          )}
 
           <div className="mb-4 flex items-center justify-between gap-3">
             <button
@@ -169,6 +326,42 @@ export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props
                 </span>
               )}
             </button>
+            {savedFilters.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={savedSel}
+                  onChange={(e) => applySaved(e.target.value)}
+                  aria-label="Filtros salvos"
+                  className="h-8 max-w-40 rounded-[4px] border border-line bg-surface px-2 text-xs font-semibold text-ink outline-none focus:border-brand"
+                >
+                  <option value="">Filtros salvos</option>
+                  {savedFilters.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+                {savedSel && (
+                  <button
+                    type="button"
+                    onClick={() => doRemoveSaved(savedSel)}
+                    aria-label="Remover filtro salvo"
+                    className="grid size-8 place-items-center rounded-[4px] border border-line bg-surface text-xs font-semibold text-ink-soft hover:border-brand hover:text-brand"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setSavingFilter((v) => !v)}
+              disabled={!canSave}
+              aria-expanded={savingFilter}
+              className="h-8 rounded-[4px] border border-line bg-surface px-3 text-xs font-semibold text-ink hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:text-ink-soft/50"
+            >
+              Salvar filtros
+            </button>
             <label className="flex items-center gap-2 text-xs text-ink-soft">
               Ordenar por
               <select
@@ -188,17 +381,49 @@ export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props
             </label>
           </div>
 
+          {savingFilter && (
+            <div className="mb-4 flex items-center gap-2">
+              <input
+                value={filterName}
+                onChange={(e) => setFilterName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") doSaveFilter();
+                }}
+                placeholder="Nome do filtro"
+                aria-label="Nome do filtro"
+                className="h-8 flex-1 rounded-[4px] border border-line bg-surface px-2 text-xs text-ink outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={doSaveFilter}
+                disabled={!filterName.trim()}
+                className="btn-brand h-8 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Salvar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSavingFilter(false);
+                  setFilterName("");
+                }}
+                className="text-xs font-semibold text-ink-soft hover:text-ink"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+
           {loading ? (
             <ProductGridSkeleton count={PAGE_SIZE} />
           ) : items.length === 0 ? (
-            <div className="card grid place-items-center gap-3 rounded-lg p-12 text-center">
-              <span className="text-4xl">🔍</span>
-              <p className="text-sm font-semibold text-ink">
-                Nenhum produto encontrado
-              </p>
-              <p className="max-w-xs text-xs text-ink-soft">
-                Tente ajustar os filtros ou buscar por outro termo.
-              </p>
+            <div className="grid gap-2">
+              <EmptyState
+                icon="search"
+                title="Nenhum produto encontrado"
+                message="Tente ajustar os filtros ou buscar por outro termo."
+                cta={{ to: "/produtos", label: "Ver catálogo" }}
+              />
               <button
                 onClick={() =>
                   patch(
@@ -222,11 +447,12 @@ export default function CatalogView({ title, subtitle, fixedCat, crumbs }: Props
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                {pageItems.map((p, i) => (
+              <VirtualGrid
+                items={pageItems}
+                render={(p, i) => (
                   <ProductCard key={p.id} product={p} index={i % PAGE_SIZE} />
-                ))}
-              </div>
+                )}
+              />
               <Pagination page={page} pages={pages} onChange={goPage} />
             </>
           )}

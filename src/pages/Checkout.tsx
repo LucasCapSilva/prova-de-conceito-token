@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCart } from "../context/cartCore";
+import { useAuth } from "../context/authCore";
 import { getSeller } from "../data/sellers";
-import { getCoupon, getCouponForSeller } from "../data/coupons";
+import { getCoupon } from "../data/coupons";
+import { lookupSellerCoupon } from "../lib/sellerCoupons";
 import { findCep } from "../data/ceps";
 import {
   cvvValid,
@@ -14,12 +16,26 @@ import {
   maskExpiry,
 } from "../lib/masks";
 import { quoteShippingOptions } from "../lib/shipping";
+import { pickupForCep } from "../lib/pickup";
+import {
+  SCHEDULE_FEE,
+  SCHEDULE_SLOTS,
+  nextBusinessDays,
+  slotLabel,
+  type ScheduleSlot,
+} from "../lib/schedule";
 import { computeCoupon, computePixDiscount } from "../lib/totals";
-import { createOrder, type Address } from "../lib/orders";
+import { createOrder, GIFT_WRAP_FEE, type Address } from "../lib/orders";
 import { describeSelection, unitPriceFor } from "../lib/variants";
 import { earnCoins, getCoins, spendCoins } from "../lib/coins";
+import {
+  availableCashback,
+  creditCashback,
+  applyCashback,
+} from "../lib/cashback";
 import { getCards } from "../lib/cards";
-import { formatBRL } from "../lib/format";
+import { clearDraft, loadDraft, saveDraft } from "../lib/checkoutDraft";
+import { formatBRL, formatDate } from "../lib/format";
 import SmartImage from "../components/SmartImage";
 
 const STEPS = ["Endereço", "Entrega", "Pagamento", "Revisão"] as const;
@@ -49,29 +65,88 @@ function FakeQR() {
       aria-hidden
     >
       {cells.map((on, i) => (
-        <span key={i} className={`aspect-square w-2 ${on ? "bg-ink" : ""}`} />
+        <span key={`qr-${i}`} className={`aspect-square w-2 ${on ? "bg-ink" : ""}`} />
       ))}
     </div>
   );
 }
 
+function weekdayShort(iso: string) {
+  return new Date(iso + "T12:00:00").toLocaleDateString("pt-BR", {
+    weekday: "short",
+  });
+}
+
 export default function Checkout() {
   const navigate = useNavigate();
   const { items, selected, couponCode, sellerCoupons, clear } = useCart();
+  const { user } = useAuth();
 
-  const [step, setStep] = useState<StepId>(0);
-  const [address, setAddress] = useState<Address>(EMPTY_ADDRESS);
+  const [draft] = useState(() => loadDraft());
+  const [step, setStep] = useState<StepId>(draft ? draft.step : 0);
+  const [address, setAddress] = useState<Address>(
+    draft ? draft.address : EMPTY_ADDRESS
+  );
   const [cepLoading, setCepLoading] = useState(false);
   const [addrTouched, setAddrTouched] = useState(false);
-  const [shippingId, setShippingId] = useState<string | null>(null);
-  const [payment, setPayment] = useState<PayMethod>("pix");
-  const [installments, setInstallments] = useState(1);
+  const [shippingId, setShippingId] = useState<string | null>(
+    draft ? draft.shippingId : null
+  );
+  const [pickupMode, setPickupMode] = useState(draft ? draft.pickup : false);
+  const [payment, setPayment] = useState<PayMethod>(
+    draft ? draft.payment : "pix"
+  );
+  const [installments, setInstallments] = useState(
+    draft ? draft.installments : 1
+  );
   const [cardNumber, setCardNumber] = useState("");
   const [cardExpiry, setCardExpiry] = useState("");
   const [cardCvv, setCardCvv] = useState("");
   const [savedCardId, setSavedCardId] = useState<string | null>(null);
-  const [coinsUsed, setCoinsUsed] = useState(0);
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitCardA, setSplitCardA] = useState("");
+  const [splitCardB, setSplitCardB] = useState("");
+  const [splitAmount, setSplitAmount] = useState(0);
+  const [splitNA, setSplitNA] = useState(1);
+  const [splitNB, setSplitNB] = useState(1);
+  const [coinsUsed, setCoinsUsed] = useState(draft ? draft.coinsUsed : 0);
+  const [cashbackUsed, setCashbackUsed] = useState(0);
+  const [giftWrap, setGiftWrap] = useState(false);
+  const [giftMsg, setGiftMsg] = useState("");
+  const [schedMode, setSchedMode] = useState(draft ? draft.scheduleMode : false);
+  const [schedDate, setSchedDate] = useState(draft ? draft.scheduleDate : "");
+  const [schedSlot, setSchedSlot] = useState<ScheduleSlot | "">(
+    draft ? (draft.scheduleSlot as ScheduleSlot | "") : ""
+  );
+  const [resumed, setResumed] = useState(draft !== null);
   const savedCards = getCards();
+
+  useEffect(() => {
+    saveDraft({
+      step,
+      address,
+      shippingId,
+      pickup: pickupMode,
+      payment,
+      installments,
+      coinsUsed,
+      scheduleMode: schedMode,
+      scheduleDate: schedDate,
+      scheduleSlot: schedSlot,
+      savedAt: Date.now(),
+    });
+  }, [
+    step,
+    address,
+    shippingId,
+    pickupMode,
+    payment,
+    installments,
+    coinsUsed,
+    schedMode,
+    schedDate,
+    schedSlot,
+  ]);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -103,7 +178,7 @@ export default function Checkout() {
         );
       out.push({
         code,
-        discount: computeCoupon(getCouponForSeller(code, sid), sub, today)
+        discount: computeCoupon(lookupSellerCoupon(code, sid), sub, today)
           .discount,
       });
     }
@@ -153,29 +228,86 @@ export default function Checkout() {
   const selectedOption = activeShippingId
     ? shippingOptions?.find((o) => o.id === activeShippingId) ?? null
     : null;
+  const pickupSelection = useMemo(
+    () => (pickupMode ? pickupForCep(address.cep) : null),
+    [pickupMode, address.cep]
+  );
   const goods = Math.max(
     0,
     selectedSubtotal - coupon.discount - sellerDiscountTotal
   );
   const pixDiscount = payment === "pix" ? computePixDiscount(goods) : 0;
-  const shippingValue = selectedOption?.value ?? 0;
+  const shippingValue = pickupSelection ? 0 : selectedOption?.value ?? 0;
+  const deliveryDays = pickupSelection
+    ? pickupSelection.readyInDays
+    : selectedOption?.days ?? 3;
 
-  function installmentInfo(n: number) {
+  function installmentInfo(n: number, base = goods) {
     const rate = n > 6 ? 0.0199 : 0;
-    const financed = goods * Math.pow(1 + rate, n);
+    const financed = base * Math.pow(1 + rate, n);
     return { value: financed / n, total: financed, interestFree: rate === 0 };
   }
+  function interestFor(amount: number, n: number) {
+    return installmentInfo(n, amount).total - amount;
+  }
 
-  const cardInterest =
-    payment === "cartao" ? installmentInfo(installments).total - goods : 0;
   const coinBalance = getCoins();
+  const giftFee = giftWrap ? GIFT_WRAP_FEE : 0;
+  const schedDays = useMemo(() => nextBusinessDays(15), []);
+  const schedIncomplete =
+    !pickupMode && schedMode && (schedDate === "" || schedSlot === "");
+  const scheduled = !pickupMode && schedDate !== "" && schedSlot !== "";
+  const scheduleFee = scheduled ? SCHEDULE_FEE : 0;
+  const splitBase = goods + shippingValue + giftFee + scheduleFee;
+  const splitCents = Math.round(splitBase * 100);
+  const splitAmountCents = Math.round(splitAmount * 100);
+  const splitClampedCents = Math.min(
+    Math.max(1, splitAmountCents),
+    Math.max(1, splitCents - 1)
+  );
+  const splitCardAObj = savedCards.find((c) => c.id === splitCardA);
+  const splitCardBObj = savedCards.find((c) => c.id === splitCardB);
+  const splitAmountOk =
+    splitAmountCents >= 1 && splitAmountCents <= splitCents - 1;
+  const splitValid =
+    Boolean(splitCardAObj) &&
+    Boolean(splitCardBObj) &&
+    splitCardAObj!.id !== splitCardBObj!.id &&
+    splitAmountOk;
+  const splitInterest =
+    payment === "cartao" && splitMode
+      ? interestFor(splitClampedCents / 100, splitNA) +
+        interestFor((splitCents - splitClampedCents) / 100, splitNB)
+      : 0;
+  const cardInterest =
+    payment === "cartao"
+      ? splitMode
+        ? splitInterest
+        : installmentInfo(installments).total - goods
+      : 0;
   const maxCoins = Math.min(
     coinBalance,
     Math.floor((goods - pixDiscount + shippingValue + cardInterest) * 0.05)
   );
   const coinsValue = Math.min(Math.max(0, Math.floor(coinsUsed)), maxCoins);
-  const total =
-    goods - pixDiscount + shippingValue + cardInterest - coinsValue;
+  const cashbackBalanceCents = availableCashback();
+  const baseTotal =
+    goods - pixDiscount + shippingValue + cardInterest - coinsValue + giftFee +
+    scheduleFee;
+  const maxCashbackCents = Math.min(
+    cashbackBalanceCents,
+    Math.floor(baseTotal * 100)
+  );
+  const cashbackValue = Math.min(
+    Math.max(0, cashbackUsed),
+    maxCashbackCents / 100
+  );
+  const splitCoveredCents =
+    splitCents +
+    Math.round(splitInterest * 100) -
+    Math.round(coinsValue * 100) -
+    Math.round(cashbackValue * 100);
+  const total = baseTotal - cashbackValue;
 
   const addrErrors = useMemo(() => {
     const e: Record<string, boolean> = {};
@@ -199,10 +331,38 @@ export default function Checkout() {
     };
   }, [payment, cardNumber, cardExpiry, cardCvv, savedCardId]);
   const payValid =
-    payment !== "cartao" || Object.values(payErrors).every((v) => !v);
+    payment !== "cartao" ||
+    (splitMode ? splitValid : Object.values(payErrors).every((v) => !v));
 
   const paymentLabel =
-    payment === "pix" ? "Pix" : payment === "boleto" ? "Boleto" : `Cartão (${installments}x)`;
+    payment === "pix"
+      ? "Pix"
+      : payment === "boleto"
+        ? "Boleto"
+        : splitMode
+          ? `Cartão dividido (${splitNA}x + ${splitNB}x)`
+          : `Cartão (${installments}x)`;
+
+  function toggleSplit(on: boolean) {
+    if (on) {
+      if (savedCards.length >= 2) {
+        setSplitCardA(savedCards[0].id);
+        setSplitCardB(savedCards[1].id);
+      }
+      setSplitAmount(Math.round((splitBase / 2) * 100) / 100);
+      setSplitNA(1);
+      setSplitNB(1);
+    }
+    setSplitMode(on);
+  }
+  function pickCardA(id: string) {
+    if (id === splitCardB) setSplitCardB(splitCardA);
+    setSplitCardA(id);
+  }
+  function pickCardB(id: string) {
+    if (id === splitCardA) setSplitCardA(splitCardB);
+    setSplitCardB(id);
+  }
 
   function setField(k: keyof Address, v: string) {
     setAddress((a) => ({ ...a, [k]: v }));
@@ -212,7 +372,8 @@ export default function Checkout() {
       setAddrTouched(true);
       return;
     }
-    if (step === 1 && !selectedOption) return;
+    if (step === 1 && !pickupSelection && !selectedOption) return;
+    if (step === 1 && schedIncomplete) return;
     if (step === 2 && !payValid) return;
     setStep((s) => Math.min(3, s + 1) as StepId);
   }
@@ -238,11 +399,25 @@ export default function Checkout() {
       shipping: shippingValue,
       total,
       payment: paymentLabel,
+      ...(user?.id ? { accountId: user.id } : {}),
       address,
-      deliveryDays: selectedOption?.days ?? 3,
+      pickup: pickupSelection ?? undefined,
+      deliveryDays,
+      schedule:
+        !pickupMode && schedDate !== "" && schedSlot !== ""
+          ? { date: schedDate, slot: schedSlot, fee: SCHEDULE_FEE }
+          : undefined,
+      gift: giftWrap
+        ? { fee: GIFT_WRAP_FEE, message: giftMsg.trim() }
+        : undefined,
     });
     if (coinsValue > 0) spendCoins(coinsValue);
     earnCoins(Math.floor(total));
+    creditCashback(order);
+    if (cashbackValue > 0)
+      applyCashback(order.id, Math.round(cashbackValue * 100));
+    setCashbackUsed(0);
+    clearDraft();
     clear();
     navigate(`/pedido/${order.id}`);
   }
@@ -277,7 +452,7 @@ export default function Checkout() {
   const card = "card p-4";
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pt-32 pb-12 sm:pt-28">
+    <div className="mx-auto max-w-6xl px-4 pt-32 pb-28 sm:pt-28 lg:pb-12">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-black text-ink sm:text-2xl">
           Finalizar compra
@@ -286,6 +461,25 @@ export default function Checkout() {
           ← Carrinho
         </Link>
       </div>
+
+      {resumed && (
+        <div
+          role="status"
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-ship/50 bg-ship/10 px-3 py-2 text-sm text-ink"
+        >
+          <span>
+            Retomamos seu rascunho de checkout — você está na etapa{" "}
+            <b className="font-black">{STEPS[step]}</b>.
+          </span>
+          <button
+            type="button"
+            onClick={() => setResumed(false)}
+            className="text-xs font-bold text-ink-soft underline underline-offset-2 hover:text-brand"
+          >
+            Entendi
+          </button>
+        </div>
+      )}
 
       {/* Etapas */}
       <ol className="mb-8 flex items-center gap-2 sm:gap-3">
@@ -368,7 +562,64 @@ export default function Checkout() {
           {step === 1 && (
             <div>
               <h2 className="mb-4 text-lg font-black text-ink">Forma de entrega</h2>
-              {shippingOptions ? (
+              <div className="mb-3 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Forma de entrega">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!pickupMode}
+                  onClick={() => setPickupMode(false)}
+                  className={`rounded-md border px-3 py-3 text-left transition ${
+                    !pickupMode ? "border-brand bg-brand-soft" : "border-line hover:border-brand/40"
+                  }`}
+                >
+                  <span className="text-sm font-bold text-ink">Entrega em casa</span>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    Enviamos para o endereço informado
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={pickupMode}
+                  onClick={() => setPickupMode(true)}
+                  className={`rounded-md border px-3 py-3 text-left transition ${
+                    pickupMode ? "border-brand bg-brand-soft" : "border-line hover:border-brand/40"
+                  }`}
+                >
+                  <span className="text-sm font-bold text-ink">
+                    Retirada em ponto de coleta
+                  </span>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    Frete grátis · pronto em 1 a 3 dias
+                  </p>
+                </button>
+              </div>
+              {pickupMode ? (
+                pickupSelection ? (
+                  <div className="rounded-md border border-brand/40 bg-brand-soft p-3">
+                    <p className="text-sm font-bold text-ink">
+                      {pickupSelection.point.name}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      {pickupSelection.point.street}, {pickupSelection.point.number} —{" "}
+                      {pickupSelection.point.neighborhood},{" "}
+                      {pickupSelection.point.city}/{pickupSelection.point.state} · CEP{" "}
+                      {pickupSelection.point.cep}
+                    </p>
+                    <p className="text-xs text-ink-soft">
+                      Funcionamento: {pickupSelection.point.hours}
+                    </p>
+                    <p className="mt-2 text-xs font-bold text-ship">
+                      Pronto para retirada em até {pickupSelection.readyInDays}{" "}
+                      dia{pickupSelection.readyInDays !== 1 ? "s" : ""} · Frete grátis
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-ink-soft">
+                    Preencha um CEP válido na etapa de endereço para escolher o ponto de coleta.
+                  </p>
+                )
+              ) : shippingOptions ? (
                 <div className="grid gap-2">
                   {shippingOptions.map((o) => (
                     <button
@@ -397,6 +648,109 @@ export default function Checkout() {
                   Preencha um CEP válido na etapa de endereço para ver as opções de entrega.
                 </p>
               )}
+              {!pickupMode && (
+                <div className="mt-4 rounded-md border border-line p-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={schedMode}
+                      onChange={(e) => setSchedMode(e.target.checked)}
+                      className="h-4 w-4 accent-brand"
+                    />
+                    <span className="text-sm font-bold text-ink">
+                      Agendar data e horário de entrega
+                    </span>
+                    <span className="text-xs text-ink-soft">
+                      +{formatBRL(SCHEDULE_FEE)}
+                    </span>
+                  </label>
+                  {schedMode && (
+                    <div className="mt-3">
+                      <p className={label}>Data (próximos 15 dias úteis)</p>
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {schedDays.map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setSchedDate(d)}
+                            aria-pressed={schedDate === d}
+                            className={`rounded-md border px-1 py-2 text-center text-[11px] leading-tight transition ${
+                              schedDate === d
+                                ? "border-brand bg-brand-soft"
+                                : "border-line hover:border-brand/40"
+                            }`}
+                          >
+                            <span
+                              className={`block font-bold ${
+                                schedDate === d ? "text-brand" : "text-ink"
+                              }`}
+                            >
+                              {d.slice(8, 10)}/{d.slice(5, 7)}
+                            </span>
+                            <span className="block text-ink-soft">
+                              {weekdayShort(d)}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className={`${label} mt-3`}>Horário</p>
+                      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+                        {SCHEDULE_SLOTS.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => setSchedSlot(s.id)}
+                            aria-pressed={schedSlot === s.id}
+                            className={`rounded-md border px-2 py-2 text-center text-xs font-bold transition ${
+                              schedSlot === s.id
+                                ? "border-brand bg-brand-soft text-brand"
+                                : "border-line text-ink-soft hover:border-brand/40"
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                      {schedIncomplete && (
+                        <p className="mt-2 text-xs text-ink-soft">
+                          Escolha a data e o horário para continuar.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="mt-4 rounded-md border border-line p-3">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={giftWrap}
+                    onChange={(e) => setGiftWrap(e.target.checked)}
+                    className="h-4 w-4 accent-brand"
+                  />
+                  <span className="text-sm font-bold text-ink">
+                    Embrulhar como presente
+                  </span>
+                  <span className="text-xs text-ink-soft">
+                    +{formatBRL(GIFT_WRAP_FEE)}
+                  </span>
+                </label>
+                {giftWrap && (
+                  <div className="mt-2">
+                    <label className={label}>
+                      Mensagem para o presente (opcional)
+                    </label>
+                    <textarea
+                      value={giftMsg}
+                      onChange={(e) => setGiftMsg(e.target.value)}
+                      maxLength={120}
+                      rows={2}
+                      placeholder="Escreva a mensagem que vai no cartão"
+                      className="w-full rounded-md border border-line px-3 py-2 text-sm text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -448,8 +802,207 @@ export default function Checkout() {
                 >
                   <span className="text-sm font-bold text-ink">Cartão de crédito</span>
                 </button>
-                 {payment === "cartao" && (
+                  {payment === "cartao" && (
                     <div className="rounded-md border border-brand/40 bg-brand-soft px-3 py-3">
+                      <div className="mb-3">
+                        {savedCards.length >= 2 ? (
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={splitMode}
+                              onChange={(e) => toggleSplit(e.target.checked)}
+                              className="h-4 w-4 accent-brand"
+                            />
+                            <span className="text-sm font-bold text-ink">
+                              Dividir em dois cartões salvos
+                            </span>
+                          </label>
+                        ) : (
+                          <p className="text-xs text-ink-soft">
+                            Para dividir o pagamento, salve pelo menos 2 cartões em{" "}
+                            <Link
+                              to="/cartoes"
+                              className="font-bold text-brand hover:underline"
+                            >
+                              meus cartões
+                            </Link>
+                            .
+                          </p>
+                        )}
+                      </div>
+                      {splitMode ? (
+                        <>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="rounded-md border border-line bg-white p-3">
+                              <p className="mb-2 text-xs font-black uppercase tracking-wide text-ink-soft">
+                                Cartão 1
+                              </p>
+                              <label className={label}>Usar cartão</label>
+                              <select
+                                value={splitCardA}
+                                onChange={(e) => pickCardA(e.target.value)}
+                                className={payInputCls(false)}
+                                aria-label="Cartão usado para a primeira parte do pagamento"
+                              >
+                                {savedCards.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.brand} •••• {c.last4}
+                                  </option>
+                                ))}
+                              </select>
+                              <label className={`${label} mt-3`}>
+                                Valor no cartão 1
+                              </label>
+                              <input
+                                type="number"
+                                min={0.01}
+                                max={Math.max(0.01, splitCoveredCents / 100 - 0.01)}
+                                step={0.01}
+                                value={splitAmount}
+                                onChange={(e) =>
+                                  setSplitAmount(Number(e.target.value) || 0)
+                                }
+                                className={payInputCls(!splitAmountOk)}
+                                aria-label="Valor cobrado no cartão 1"
+                              />
+                              <p className={`${label} mt-3`}>Parcelas do cartão 1</p>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {[1, 2, 3, 4, 6, 10, 12].map((n) => {
+                                  const info = installmentInfo(
+                                    n,
+                                    splitClampedCents / 100
+                                  );
+                                  return (
+                                    <button
+                                      key={n}
+                                      type="button"
+                                      onClick={() => setSplitNA(n)}
+                                      aria-pressed={splitNA === n}
+                                      className={`rounded border px-2 py-1.5 text-left transition ${
+                                        splitNA === n
+                                          ? "border-brand bg-white"
+                                          : "border-line bg-white hover:border-brand/40"
+                                      }`}
+                                    >
+                                      <span className="block text-xs font-black text-ink">
+                                        {n}x{" "}
+                                        <span
+                                          className={
+                                            info.interestFree
+                                              ? "text-ship"
+                                              : "text-brand"
+                                          }
+                                        >
+                                          {info.interestFree
+                                            ? "sem juros"
+                                            : "com juros"}
+                                        </span>
+                                      </span>
+                                      <span className="block text-[11px] text-ink-soft">
+                                        {formatBRL(info.value)}/mês
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div className="rounded-md border border-line bg-white p-3">
+                              <p className="mb-2 text-xs font-black uppercase tracking-wide text-ink-soft">
+                                Cartão 2
+                              </p>
+                              <label className={label}>Usar cartão</label>
+                              <select
+                                value={splitCardB}
+                                onChange={(e) => pickCardB(e.target.value)}
+                                className={payInputCls(false)}
+                                aria-label="Cartão usado para a segunda parte do pagamento"
+                              >
+                                {savedCards.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.brand} •••• {c.last4}
+                                  </option>
+                                ))}
+                              </select>
+                              <label className={`${label} mt-3`}>
+                                Valor no cartão 2
+                              </label>
+                              <p className="rounded-md border border-line bg-white px-3 py-2 text-sm font-bold text-ink">
+                                {formatBRL(
+                                  (splitCoveredCents - splitClampedCents) / 100
+                                )}
+                                <span className="ml-1 text-[11px] font-normal text-ink-soft">
+                                  (paga a diferença)
+                                </span>
+                              </p>
+                              <p className={`${label} mt-3`}>Parcelas do cartão 2</p>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {[1, 2, 3, 4, 6, 10, 12].map((n) => {
+                                  const info = installmentInfo(
+                                    n,
+                                    (splitCoveredCents - splitClampedCents) / 100
+                                  );
+                                  return (
+                                    <button
+                                      key={n}
+                                      type="button"
+                                      onClick={() => setSplitNB(n)}
+                                      aria-pressed={splitNB === n}
+                                      className={`rounded border px-2 py-1.5 text-left transition ${
+                                        splitNB === n
+                                          ? "border-brand bg-white"
+                                          : "border-line bg-white hover:border-brand/40"
+                                      }`}
+                                    >
+                                      <span className="block text-xs font-black text-ink">
+                                        {n}x{" "}
+                                        <span
+                                          className={
+                                            info.interestFree
+                                              ? "text-ship"
+                                              : "text-brand"
+                                          }
+                                        >
+                                          {info.interestFree
+                                            ? "sem juros"
+                                            : "com juros"}
+                                        </span>
+                                      </span>
+                                      <span className="block text-[11px] text-ink-soft">
+                                        {formatBRL(info.value)}/mês
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                          {!splitAmountOk && (
+                            <p className="mt-2 text-xs font-bold text-red-500">
+                              O valor do cartão 1 deve ficar entre {formatBRL(0.01)} e{" "}
+                              {formatBRL(Math.max(0.01, splitCoveredCents / 100 - 0.01))}{" "}
+                              para que os dois cartões fechem exatamente{" "}
+                              {formatBRL(splitCoveredCents / 100)}.
+                            </p>
+                          )}
+                          {splitCardAObj && splitCardBObj && splitCardAObj.id === splitCardBObj.id && (
+                            <p className="mt-2 text-xs font-bold text-red-500">
+                              Escolha dois cartões diferentes.
+                            </p>
+                          )}
+                          {splitValid && splitCardAObj && splitCardBObj && (
+                            <p className="mt-2 text-xs font-bold text-ink">
+                              {splitCardAObj.brand} •••• {splitCardAObj.last4} paga{" "}
+                              {formatBRL(splitClampedCents / 100)} em {splitNA}x ·{" "}
+                              {splitCardBObj.brand} •••• {splitCardBObj.last4} paga{" "}
+                              {formatBRL(
+                                (splitCoveredCents - splitClampedCents) / 100
+                              )}{" "}
+                              em {splitNB}x.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <>
                       {savedCards.length > 0 && (
                         <div className="mb-3">
                           <p className="mb-2 text-xs font-bold text-ink-soft">
@@ -574,16 +1127,18 @@ export default function Checkout() {
                             <span className="block text-[11px] text-ink-soft">
                               {formatBRL(info.value)}/mês
                             </span>
-                            <span className="block text-[11px] text-ink-soft">
-                              total {formatBRL(info.total)}
-                              {!info.interestFree && " · 1,99% a.m."}
-                            </span>
-                          </button>
-                        );
-                      })}
+                              <span className="block text-[11px] text-ink-soft">
+                                total {formatBRL(info.total)}
+                                {!info.interestFree && " · 1,99% a.m."}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                        </>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )}
               </div>
 
               <div className="mt-3 rounded-md border border-line p-3">
@@ -614,6 +1169,38 @@ export default function Checkout() {
                   </p>
                 )}
               </div>
+
+              <div className="mt-3 rounded-md border border-line p-3">
+                <label className={label}>Cashback</label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="number"
+                    min={0}
+                    max={maxCashbackCents / 100}
+                    step={0.01}
+                    value={cashbackUsed}
+                    onChange={(e) =>
+                      setCashbackUsed(
+                        Math.max(0, Number(e.target.value) || 0)
+                      )
+                    }
+                    className="w-28 rounded-md border border-line px-3 py-2 text-sm text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    aria-label="Valor do cashback a usar"
+                  />
+                  <p className="text-xs text-ink-soft">
+                    Saldo disponível:{" "}
+                    <span className="font-bold text-ink">
+                      {formatBRL(cashbackBalanceCents / 100)}
+                    </span>{" "}
+                    · limite {formatBRL(maxCashbackCents / 100)}
+                  </p>
+                </div>
+                {cashbackValue > 0 && (
+                  <p className="mt-2 text-xs font-bold text-ship">
+                    −{formatBRL(cashbackValue)} com o cashback
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -621,29 +1208,99 @@ export default function Checkout() {
             <div>
               <h2 className="mb-4 text-lg font-black text-ink">Revisão</h2>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-md border border-line p-3">
-                  <p className="mb-1 text-xs font-black uppercase tracking-wide text-ink-soft">Endereço</p>
-                  <p className="text-sm text-ink">
-                    {address.name} — {address.street}, {address.number}
-                    {address.complement ? `, ${address.complement}` : ""}
-                  </p>
-                  <p className="text-xs text-ink-soft">
-                    {address.neighborhood ? `${address.neighborhood}, ` : ""}
-                    {address.city}/{address.state} — CEP {address.cep}
-                  </p>
-                </div>
+                {pickupSelection ? (
+                  <div className="rounded-md border border-line p-3 sm:col-span-2">
+                    <p className="mb-1 text-xs font-black uppercase tracking-wide text-ink-soft">
+                      Ponto de coleta
+                    </p>
+                    <p className="text-sm text-ink">
+                      {pickupSelection.point.name} — {pickupSelection.point.street},{" "}
+                      {pickupSelection.point.number}
+                    </p>
+                    <p className="text-xs text-ink-soft">
+                      {pickupSelection.point.neighborhood},{" "}
+                      {pickupSelection.point.city}/{pickupSelection.point.state} — CEP{" "}
+                      {pickupSelection.point.cep}
+                    </p>
+                    <p className="text-xs text-ink-soft">
+                      Funcionamento: {pickupSelection.point.hours}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-line p-3">
+                    <p className="mb-1 text-xs font-black uppercase tracking-wide text-ink-soft">Endereço</p>
+                    <p className="text-sm text-ink">
+                      {address.name} — {address.street}, {address.number}
+                      {address.complement ? `, ${address.complement}` : ""}
+                    </p>
+                    <p className="text-xs text-ink-soft">
+                      {address.neighborhood ? `${address.neighborhood}, ` : ""}
+                      {address.city}/{address.state} — CEP {address.cep}
+                    </p>
+                  </div>
+                )}
                 <div className="rounded-md border border-line p-3">
                   <p className="mb-1 text-xs font-black uppercase tracking-wide text-ink-soft">Entrega</p>
-                  <p className="text-sm text-ink">{selectedOption?.name ?? "—"}</p>
-                  <p className="text-xs text-ink-soft">
-                    até {selectedOption?.days} dia{selectedOption?.days !== 1 ? "s" : ""} ·{" "}
-                    {selectedOption && selectedOption.value > 0 ? formatBRL(selectedOption.value) : "Grátis"}
-                  </p>
+                  {pickupSelection ? (
+                    <>
+                      <p className="text-sm text-ink">Retirada em ponto de coleta</p>
+                      <p className="text-xs text-ink-soft">
+                        pronto em até {pickupSelection.readyInDays}{" "}
+                        dia{pickupSelection.readyInDays !== 1 ? "s" : ""} · Grátis
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-ink">{selectedOption?.name ?? "—"}</p>
+                      <p className="text-xs text-ink-soft">
+                        até {selectedOption?.days} dia{selectedOption?.days !== 1 ? "s" : ""} ·{" "}
+                        {selectedOption && selectedOption.value > 0 ? formatBRL(selectedOption.value) : "Grátis"}
+                      </p>
+                      {scheduled && (
+                        <p className="mt-1 text-xs font-bold text-brand">
+                          Agendada para {formatDate(schedDate)} · {slotLabel(schedSlot)}
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
+              {giftWrap && (
+                <div className="mt-3 rounded-md border border-line p-3">
+                  <p className="mb-1 text-xs font-black uppercase tracking-wide text-ink-soft">
+                    Presente
+                  </p>
+                  <p className="text-sm text-ink">
+                    Embrulho para presente
+                    {giftMsg.trim()
+                      ? ` — “${giftMsg.trim()}”`
+                      : ""}
+                  </p>
+                </div>
+              )}
               <p className="mt-3 text-sm font-bold text-ink">
                 Pagamento: <span className="text-brand">{paymentLabel}</span>
               </p>
+              {payment === "cartao" && splitMode && splitCardAObj && splitCardBObj && (
+                <div className="mt-2 rounded-md border border-line p-3">
+                  <p className="text-xs text-ink-soft">
+                    <span className="font-bold text-ink">
+                      {splitCardAObj.brand} •••• {splitCardAObj.last4}
+                    </span>{" "}
+                    — {formatBRL(splitClampedCents / 100)} em {splitNA}x
+                  </p>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    <span className="font-bold text-ink">
+                      {splitCardBObj.brand} •••• {splitCardBObj.last4}
+                    </span>{" "}
+                    —{" "}
+                    {formatBRL(
+                      (splitCoveredCents - splitClampedCents) / 100
+                    )}{" "}
+                    em {splitNB}x
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -660,17 +1317,17 @@ export default function Checkout() {
                 onClick={next}
                 disabled={
                   (step === 0 && !addrValid) ||
-                  (step === 1 && !selectedOption) ||
+                    (step === 1 && ((!pickupSelection && !selectedOption) || schedIncomplete)) ||
                   (step === 2 && !payValid)
                 }
-                className="rounded-md bg-brand px-5 py-2 text-sm font-bold text-white transition hover:bg-brand-dark disabled:opacity-40"
+                className="hidden rounded-md bg-brand px-5 py-2 text-sm font-bold text-white transition hover:bg-brand-dark disabled:opacity-40 lg:block"
               >
                 Continuar
               </button>
             ) : (
               <button
                 onClick={confirm}
-                className="rounded-md bg-brand px-5 py-2 text-sm font-bold text-white transition hover:bg-brand-dark"
+                className="hidden rounded-md bg-brand px-5 py-2 text-sm font-bold text-white transition hover:bg-brand-dark lg:block"
               >
                 Confirmar pedido
               </button>
@@ -731,16 +1388,44 @@ export default function Checkout() {
                 <dd className="font-bold">−{formatBRL(coinsValue)}</dd>
               </div>
             )}
+            {cashbackValue > 0 && (
+              <div className="flex justify-between text-ship">
+                <dt>Cashback</dt>
+                <dd className="font-bold">−{formatBRL(cashbackValue)}</dd>
+              </div>
+            )}
             <div className="flex justify-between">
-              <dt className="text-ink-soft">Frete</dt>
+              <dt className="text-ink-soft">
+                {pickupSelection ? "Frete (retirada)" : "Frete"}
+              </dt>
               <dd className="text-ink">
-                {selectedOption ? (selectedOption.value > 0 ? formatBRL(selectedOption.value) : "Grátis") : "—"}
+                {pickupSelection || selectedOption
+                  ? shippingValue > 0
+                    ? formatBRL(shippingValue)
+                    : "Grátis"
+                  : "—"}
               </dd>
             </div>
+            {giftWrap && (
+              <div className="flex justify-between">
+                <dt className="text-ink-soft">Embrulho presente</dt>
+                <dd className="text-ink">+{formatBRL(GIFT_WRAP_FEE)}</dd>
+              </div>
+            )}
             {cardInterest > 0 && (
               <div className="flex justify-between">
-                <dt className="text-ink-soft">Juros do cartão ({installments}x)</dt>
+                <dt className="text-ink-soft">
+                  Juros do cartão (
+                  {splitMode ? `${splitNA}x + ${splitNB}x` : `${installments}x`}
+                  )
+                </dt>
                 <dd className="text-ink">+{formatBRL(cardInterest)}</dd>
+              </div>
+            )}
+            {scheduleFee > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-ink-soft">Agendamento de entrega</dt>
+                <dd className="text-ink">+{formatBRL(scheduleFee)}</dd>
               </div>
             )}
             <div className="flex items-center justify-between border-t border-line pt-2 text-base">
@@ -749,6 +1434,36 @@ export default function Checkout() {
             </div>
           </dl>
         </aside>
+      </div>
+
+      {/* Barra fixa de total (telas pequenas) */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 px-4 py-3 backdrop-blur-sm lg:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold text-ink-soft">Total</p>
+            <p className="text-lg font-black text-brand">{formatBRL(total)}</p>
+          </div>
+          {step < 3 ? (
+            <button
+              onClick={next}
+              disabled={
+                (step === 0 && !addrValid) ||
+                (step === 1 && (!selectedOption || schedIncomplete)) ||
+                (step === 2 && !payValid)
+              }
+              className="rounded-md bg-brand px-6 py-2.5 text-sm font-bold text-white transition hover:bg-brand-dark disabled:opacity-40"
+            >
+              Continuar
+            </button>
+          ) : (
+            <button
+              onClick={confirm}
+              className="rounded-md bg-brand px-6 py-2.5 text-sm font-bold text-white transition hover:bg-brand-dark"
+            >
+              Confirmar pedido
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
